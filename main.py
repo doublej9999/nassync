@@ -7,7 +7,6 @@ import shutil
 import tempfile
 import threading
 import time
-import traceback
 import zipfile
 from dataclasses import dataclass
 from http import HTTPStatus
@@ -84,6 +83,21 @@ logger = setup_logging()
 
 
 # =========================
+# 错误信息提炼
+# =========================
+def summarize_error_msg(error_msg, max_len=200):
+    """仅保留主要错误信息，避免把完整堆栈写入任务表。"""
+    if error_msg is None:
+        return None
+    text = str(error_msg).replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not text:
+        return None
+    # 只取首行，过滤 traceback 等细节
+    major = text.split("\n", 1)[0].strip()
+    return major[:max_len]
+
+
+# =========================
 # PG
 # =========================
 class PgClient:
@@ -125,6 +139,7 @@ class PgClient:
     def upsert_task_status(self, rec_type, zip_name, zip_path, status, error_msg=None):
         conn = self.pool.getconn()
         try:
+            major_error = summarize_error_msg(error_msg, max_len=200)
             with conn.cursor() as cur:
                 sql = f"""
                 INSERT INTO {self.cfg.DB_TASK_TABLE}
@@ -137,7 +152,7 @@ class PgClient:
                   error_msg = EXCLUDED.error_msg,
                   updated_at = NOW()
                 """
-                cur.execute(sql, (rec_type, zip_name, zip_path, status, error_msg))
+                cur.execute(sql, (rec_type, zip_name, zip_path, status, major_error))
             conn.commit()
         except Exception:
             conn.rollback()
@@ -439,12 +454,8 @@ class Processor:
         except Exception as ex:
             # 避免事件回调线程因未捕获异常中断，记录后继续监听
             logger.exception(f"处理失败：{path}, err={ex}")
-            err_log = (
-                f"{type(ex).__name__}: {ex}\n"
-                f"{traceback.format_exc(limit=5)}"
-            )
             self.pg.upsert_task_status(
-                rec_type, path.name, str(path), "FAILED", err_log[:1000]
+                rec_type, path.name, str(path), "FAILED", f"{type(ex).__name__}: {ex}"
             )
         finally:
             with self.lock:
@@ -471,7 +482,7 @@ class Processor:
 
         self.pg.insert_records(rec_type, lot_wafer_pairs, path.name, str(path))
 
-        backup_dir.mkdir(exist_ok=True)
+        backup_dir.mkdir(parents=True, exist_ok=True)
         shutil.move(str(path), str(backup_dir / path.name))
 
         logger.info(f"完成：{path}")
