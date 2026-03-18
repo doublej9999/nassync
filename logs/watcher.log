@@ -173,3 +173,30 @@ Exception: 文件未稳定
 2026-03-19 00:26:16,329 [INFO] 跳过（文件不存在，可能已处理）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\G39S78.zip
 2026-03-19 00:26:16,334 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S78.zip
 2026-03-19 00:26:16,335 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S78.zip
+2026-03-19 00:28:01,347 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S23.zip
+2026-03-19 00:28:01,347 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S77.zip
+2026-03-19 00:28:01,347 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S88.zip
+2026-03-19 00:28:01,347 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S94.zip
+2026-03-19 00:28:01,347 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S95.zip
+2026-03-19 00:28:01,347 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S99.zip
+2026-03-19 00:28:01,347 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S78.zip
+2026-03-19 00:28:01,347 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S96.zip
+2026-03-19 00:28:01,347 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S97.zip
+2026-03-19 00:28:01,347 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S98.zip
+2026-03-19 00:28:01,348 [INFO] 启动监听...
+2026-03-19 00:28:02,290 [INFO] Web 监控已启动：http://0.0.0.0:8080/dashboard
+2026-03-19 00:28:04,153 [INFO] WEB 127.0.0.1 - "GET /dashboard HTTP/1.1" 200 -
+2026-03-19 00:28:04,431 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:28:04,492 [INFO] WEB 127.0.0.1 - "GET /favicon.ico HTTP/1.1" 404 -
+2026-03-19 00:28:09,436 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:28:14,432 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:28:20,400 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:28:24,891 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:28:29,427 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:28:34,444 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:28:39,434 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:28:44,428 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:28:49,441 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:28:54,429 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:28:59,425 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:29:04,446 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
