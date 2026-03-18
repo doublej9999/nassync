@@ -1,0 +1,41 @@
+2026-03-18 23:45:06,240 [INFO] 启动监控...
+2026-03-18 23:47:25,110 [INFO] 启动监控...
+2026-03-18 23:49:02,072 [INFO] 启动监控...
+2026-03-18 23:52:55,642 [INFO] 启动监控...
+2026-03-18 23:57:57,793 [INFO] 处理: C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\G39S94.zip
+2026-03-18 23:58:03,800 [ERROR] 处理失败: C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\G39S94.zip, err='Processor' object has no attribute 'MAP_RE'
+Traceback (most recent call last):
+  File "C:\Users\Administrator\Desktop\nassync\main.py", line 179, in process
+    self._process(path)
+  File "C:\Users\Administrator\Desktop\nassync\main.py", line 201, in _process
+    wafer_ids = self.extract(path, unzip_dir, lot_id)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\Desktop\nassync\main.py", line 221, in extract
+    m = self.MAP_RE.match(f)
+        ^^^^^^^^^^^
+AttributeError: 'Processor' object has no attribute 'MAP_RE'
+2026-03-18 23:58:03,804 [INFO] 处理: C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\G39S95.zip
+2026-03-18 23:58:09,810 [ERROR] 处理失败: C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\G39S95.zip, err='Processor' object has no attribute 'MAP_RE'
+Traceback (most recent call last):
+  File "C:\Users\Administrator\Desktop\nassync\main.py", line 179, in process
+    self._process(path)
+  File "C:\Users\Administrator\Desktop\nassync\main.py", line 201, in _process
+    wafer_ids = self.extract(path, unzip_dir, lot_id)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\Desktop\nassync\main.py", line 221, in extract
+    m = self.MAP_RE.match(f)
+        ^^^^^^^^^^^
+AttributeError: 'Processor' object has no attribute 'MAP_RE'
+2026-03-18 23:58:09,811 [INFO] 处理: C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\G39S96.zip
+2026-03-18 23:58:15,814 [ERROR] 处理失败: C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\G39S96.zip, err='Processor' object has no attribute 'MAP_RE'
+Traceback (most recent call last):
+  File "C:\Users\Administrator\Desktop\nassync\main.py", line 179, in process
+    self._process(path)
+  File "C:\Users\Administrator\Desktop\nassync\main.py", line 201, in _process
+    wafer_ids = self.extract(path, unzip_dir, lot_id)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\Desktop\nassync\main.py", line 221, in extract
+    if Path(f).suffix.lower() != ".map":
+        ^^^^^^^^^^^
+AttributeError: 'Processor' object has no attribute 'MAP_RE'
+2026-03-18 23:58:15,836 [INFO] 启动监控...

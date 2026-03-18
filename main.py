@@ -16,7 +16,7 @@ from watchdog.observers import Observer
 
 
 # =========================
-# 閰嶇疆
+# 配置
 # =========================
 @dataclass(frozen=True)
 class Config:
@@ -46,7 +46,7 @@ CONFIG = Config()
 
 
 # =========================
-# 鏃ュ織
+# 日志
 # =========================
 def setup_logging():
     CONFIG.LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -81,13 +81,14 @@ class PgClient:
     def __init__(self, cfg: Config):
         self.cfg = cfg
         self.pool = pool.SimpleConnectionPool(
-            1, 5,
+            1,
+            5,
             host=cfg.DB_HOST,
             port=cfg.DB_PORT,
             dbname=cfg.DB_NAME,
             user=cfg.DB_USER,
             password=cfg.DB_PASSWORD,
-            options=f"-c search_path={cfg.DB_SCHEMA}"
+            options=f"-c search_path={cfg.DB_SCHEMA}",
         )
 
     def insert_records(self, rec_type, lot_id, wafer_ids, zip_name, zip_path):
@@ -100,13 +101,10 @@ class PgClient:
                 VALUES (%s,%s,%s,%s,%s)
                 ON CONFLICT (type, lot_id, wafer_id) DO NOTHING
                 """
-                data = [
-                    (rec_type, lot_id, w, zip_name, zip_path)
-                    for w in wafer_ids
-                ]
+                data = [(rec_type, lot_id, w, zip_name, zip_path) for w in wafer_ids]
                 cur.executemany(sql, data)
             conn.commit()
-        except:
+        except Exception:
             conn.rollback()
             raise
         finally:
@@ -114,10 +112,10 @@ class PgClient:
 
 
 # =========================
-# 鏍稿績澶勭悊
+# 核心处理
 # =========================
 class Processor:
-    # lot 鍏佽瀛楁瘝鏁板瓧娣峰悎锛屼緥濡?G39S94
+    # lot 允许字母数字混合，例如 G39S94
     MAP_WAFER_RE = re.compile(r".*-(\d+)$", re.I)
 
     def __init__(self, cfg: Config, pg: PgClient):
@@ -135,7 +133,7 @@ class Processor:
 
         try:
             rel = path.relative_to(self.cfg.WATCH_DIR)
-        except:
+        except Exception:
             return False
 
         if len(rel.parts) < 3:
@@ -149,7 +147,10 @@ class Processor:
     def wait_stable(self, path: Path):
         last = None
         count = 0
-        max_checks = max(self.cfg.FILE_STABLE_CHECK_TIMES * 5, self.cfg.FILE_STABLE_CHECK_TIMES + 1)
+        max_checks = max(
+            self.cfg.FILE_STABLE_CHECK_TIMES * 5,
+            self.cfg.FILE_STABLE_CHECK_TIMES + 1,
+        )
         for _ in range(max_checks):
             if not path.exists():
                 return False
@@ -166,7 +167,7 @@ class Processor:
 
     def process(self, path: Path):
         if not self.is_valid(path):
-            logger.info(f"璺宠繃(涓嶇鍚堣鍒?: {path}")
+            logger.info(f"跳过（不符合规则）：{path}")
             return
 
         key = str(path)
@@ -178,17 +179,17 @@ class Processor:
         try:
             self._process(path)
         except Exception as ex:
-            # 閬垮厤浜嬩欢鍥炶皟绾跨▼鍥犳湭鎹曡幏寮傚父涓柇锛岃褰曞悗缁х画鐩戝惉
-            logger.exception(f"澶勭悊澶辫触: {path}, err={ex}")
+            # 避免事件回调线程因未捕获异常中断，记录后继续监听
+            logger.exception(f"处理失败：{path}, err={ex}")
         finally:
             with self.lock:
                 self.processing.remove(key)
 
     def _process(self, path: Path):
-        logger.info(f"澶勭悊: {path}")
+        logger.info(f"处理：{path}")
 
         if not self.wait_stable(path):
-            raise Exception("鏂囦欢鏈ǔ瀹?)
+            raise Exception("文件未稳定")
 
         rel = path.relative_to(self.cfg.WATCH_DIR)
 
@@ -200,14 +201,12 @@ class Processor:
 
         wafer_ids = self.extract(path, unzip_dir, lot_id)
 
-        self.pg.insert_records(
-            rec_type, lot_id, wafer_ids, path.name, str(path)
-        )
+        self.pg.insert_records(rec_type, lot_id, wafer_ids, path.name, str(path))
 
         backup_dir.mkdir(exist_ok=True)
         shutil.move(str(path), str(backup_dir / path.name))
 
-        logger.info(f"瀹屾垚: {path}")
+        logger.info(f"完成：{path}")
 
     def extract(self, zip_path, target_dir, lot_id):
         with tempfile.TemporaryDirectory() as tmp:
@@ -240,7 +239,7 @@ class Processor:
 
 
 # =========================
-# 鐩戝惉
+# 监听
 # =========================
 class Handler(FileSystemEventHandler):
     def __init__(self, p):
@@ -256,12 +255,12 @@ class Handler(FileSystemEventHandler):
 
     def on_moved(self, e):
         if not e.is_directory:
-            # 鍏煎鈥滃厛鍐欎复鏃舵枃浠跺啀閲嶅懡鍚嶄负 .zip鈥濈殑涓婁紶鏂瑰紡
+            # 兼容“先写临时文件再重命名为 .zip”的上传方式
             self.p.process(Path(e.dest_path))
 
 
 # =========================
-# 涓荤▼搴?
+# 主程序
 # =========================
 def main():
     pg = PgClient(CONFIG)
@@ -276,7 +275,7 @@ def main():
     obs.schedule(Handler(p), str(CONFIG.WATCH_DIR), recursive=True)
     obs.start()
 
-    logger.info("鍚姩鐩戞帶...")
+    logger.info("启动监听...")
 
     try:
         while True:
@@ -289,4 +288,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
