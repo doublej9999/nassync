@@ -7,6 +7,7 @@ import shutil
 import tempfile
 import threading
 import time
+import traceback
 import zipfile
 from dataclasses import dataclass
 from http import HTTPStatus
@@ -438,8 +439,12 @@ class Processor:
         except Exception as ex:
             # 避免事件回调线程因未捕获异常中断，记录后继续监听
             logger.exception(f"处理失败：{path}, err={ex}")
+            err_log = (
+                f"{type(ex).__name__}: {ex}\n"
+                f"{traceback.format_exc(limit=5)}"
+            )
             self.pg.upsert_task_status(
-                rec_type, path.name, str(path), "FAILED", str(ex)[:1000]
+                rec_type, path.name, str(path), "FAILED", err_log[:1000]
             )
         finally:
             with self.lock:
@@ -478,7 +483,8 @@ class Processor:
                 z.extractall(tmp)
 
             lot_wafer_pairs = []
-            map_name_pattern = re.compile(r"^([A-Za-z0-9]{5})-([A-Za-z0-9]{2})$")
+            map_name_pattern = re.compile(r"^([A-Za-z0-9]{6})-([A-Za-z0-9]{2})$")
+            zip_prefix = Path(zip_path).stem.split("-", 1)[0].upper()
 
             for root, _, files in os.walk(tmp):
                 for f in files:
@@ -486,10 +492,16 @@ class Processor:
                         continue
 
                     stem = Path(f).stem
+                    map_prefix = stem.split("-", 1)[0].upper()
+                    if map_prefix != zip_prefix:
+                        raise ValueError(
+                            f"ZIP 与 MAP 文件名前缀不一致：zip={Path(zip_path).name}, map={f}"
+                        )
+
                     match = map_name_pattern.match(stem)
                     if not match:
                         raise ValueError(
-                            f"MAP 文件名格式错误：{f}，期望格式为 XXXXX-XX"
+                            f"MAP 文件名格式错误：{f}，期望格式为 XXXXXX-XX"
                         )
 
                     lot_id = match.group(1).upper()
