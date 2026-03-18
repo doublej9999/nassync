@@ -1,7 +1,6 @@
 ﻿import logging
 import logging.handlers
 import os
-import re
 import shutil
 import tempfile
 import threading
@@ -91,7 +90,7 @@ class PgClient:
             options=f"-c search_path={cfg.DB_SCHEMA}",
         )
 
-    def insert_records(self, rec_type, lot_id, wafer_ids, zip_name, zip_path):
+    def insert_records(self, rec_type, lot_wafer_pairs, zip_name, zip_path):
         conn = self.pool.getconn()
         try:
             with conn.cursor() as cur:
@@ -101,7 +100,10 @@ class PgClient:
                 VALUES (%s,%s,%s,%s,%s)
                 ON CONFLICT (type, lot_id, wafer_id) DO NOTHING
                 """
-                data = [(rec_type, lot_id, w, zip_name, zip_path) for w in wafer_ids]
+                data = [
+                    (rec_type, lot_id, wafer_id, zip_name, zip_path)
+                    for lot_id, wafer_id in lot_wafer_pairs
+                ]
                 cur.executemany(sql, data)
             conn.commit()
         except Exception:
@@ -115,9 +117,6 @@ class PgClient:
 # 核心处理
 # =========================
 class Processor:
-    # lot 允许字母数字混合，例如 G39S94
-    MAP_WAFER_RE = re.compile(r".*-(\d+)$", re.I)
-
     def __init__(self, cfg: Config, pg: PgClient):
         self.cfg = cfg
         self.pg = pg
@@ -212,11 +211,9 @@ class Processor:
         unzip_dir = self.cfg.TARGET_DIR / rel.parent
         backup_dir = path.parent / "BACKUP"
 
-        lot_id = path.stem
+        lot_wafer_pairs = self.extract(path, unzip_dir)
 
-        wafer_ids = self.extract(path, unzip_dir, lot_id)
-
-        self.pg.insert_records(rec_type, lot_id, wafer_ids, path.name, str(path))
+        self.pg.insert_records(rec_type, lot_wafer_pairs, path.name, str(path))
 
         backup_dir.mkdir(exist_ok=True)
         shutil.move(str(path), str(backup_dir / path.name))
@@ -224,12 +221,12 @@ class Processor:
         logger.info(f"完成：{path}")
         return True
 
-    def extract(self, zip_path, target_dir, lot_id):
+    def extract(self, zip_path, target_dir):
         with tempfile.TemporaryDirectory() as tmp:
             with zipfile.ZipFile(zip_path) as z:
                 z.extractall(tmp)
 
-            wafer_ids = []
+            lot_wafer_pairs = []
 
             for root, _, files in os.walk(tmp):
                 for f in files:
@@ -237,21 +234,25 @@ class Processor:
                         continue
 
                     stem = Path(f).stem
-                    m = self.MAP_WAFER_RE.match(stem)
-                    if m:
-                        wafer = m.group(1).zfill(2)
-                    else:
-                        # 文件名不包含尾部数字时，使用 stem 作为兜底标识
-                        wafer = stem.upper()
+                    parts = stem.split("-", 2)
+                    if len(parts) < 2:
+                        logger.warning(f"跳过（MAP 文件名不符合 lot-wafer 规则）：{f}")
+                        continue
 
-                    wafer_ids.append(wafer)
+                    lot_id = parts[0].strip().upper()
+                    wafer_id = parts[1].strip().upper()
+                    if not lot_id or not wafer_id:
+                        logger.warning(f"跳过（MAP 文件名 lot/wafer 为空）：{f}")
+                        continue
+
+                    lot_wafer_pairs.append((lot_id, wafer_id))
 
                     src = Path(root) / f
                     dst = target_dir / f
                     target_dir.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(src, dst)
 
-            return sorted(set(wafer_ids))
+            return sorted(set(lot_wafer_pairs))
 
 
 # =========================
