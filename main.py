@@ -29,6 +29,7 @@ class Config:
     DB_USER: str = "postgres"
     DB_PASSWORD: str = "123456"
     DB_TABLE: str = "zip_record"
+    DB_TASK_TABLE: str = "zip_task_status"
 
     LOG_DIR: Path = Path(r".\logs")
 
@@ -112,6 +113,29 @@ class PgClient:
         finally:
             self.pool.putconn(conn)
 
+    def upsert_task_status(self, rec_type, zip_name, zip_path, status, error_msg=None):
+        conn = self.pool.getconn()
+        try:
+            with conn.cursor() as cur:
+                sql = f"""
+                INSERT INTO {self.cfg.DB_TASK_TABLE}
+                (type, zip_name, zip_path, status, error_msg, updated_at)
+                VALUES (%s,%s,%s,%s,%s,NOW())
+                ON CONFLICT (zip_path) DO UPDATE SET
+                  type = EXCLUDED.type,
+                  zip_name = EXCLUDED.zip_name,
+                  status = EXCLUDED.status,
+                  error_msg = EXCLUDED.error_msg,
+                  updated_at = NOW()
+                """
+                cur.execute(sql, (rec_type, zip_name, zip_path, status, error_msg))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            self.pool.putconn(conn)
+
 
 # =========================
 # 核心处理
@@ -169,6 +193,9 @@ class Processor:
             logger.info(f"跳过（不符合规则）：{path}")
             return
 
+        rel = path.relative_to(self.cfg.WATCH_DIR)
+        rec_type = rel.parts[-3]
+
         key = str(path)
         with self.lock:
             if key in self.processing:
@@ -176,9 +203,11 @@ class Processor:
             self.processing.add(key)
 
         try:
+            self.pg.upsert_task_status(rec_type, path.name, str(path), "PENDING")
             for i in range(self.cfg.PROCESS_RETRY_TIMES):
                 done = self._process(path)
                 if done:
+                    self.pg.upsert_task_status(rec_type, path.name, str(path), "SUCCESS")
                     break
                 if i < self.cfg.PROCESS_RETRY_TIMES - 1:
                     logger.info(
@@ -187,9 +216,19 @@ class Processor:
                     time.sleep(self.cfg.PROCESS_RETRY_INTERVAL_SEC)
             else:
                 logger.warning(f"处理放弃（重试后仍未稳定）：{path}")
+                self.pg.upsert_task_status(
+                    rec_type,
+                    path.name,
+                    str(path),
+                    "FAILED",
+                    "文件重试后仍未稳定",
+                )
         except Exception as ex:
             # 避免事件回调线程因未捕获异常中断，记录后继续监听
             logger.exception(f"处理失败：{path}, err={ex}")
+            self.pg.upsert_task_status(
+                rec_type, path.name, str(path), "FAILED", str(ex)[:1000]
+            )
         finally:
             with self.lock:
                 self.processing.remove(key)
