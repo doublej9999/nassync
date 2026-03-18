@@ -1,4 +1,7 @@
-/logs/
+﻿# 忽略数据与构建产物目录
 /A/
 /B/
+/build/
+/dist/
 /logs/
+/nassync.spec
