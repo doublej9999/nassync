@@ -705,3 +705,264 @@ ValueError: ZIP 与 MAP 文件名前缀不一致：zip=G39S23.zip, map=G39S95-01
 2026-03-19 00:50:15,229 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
 2026-03-19 00:50:20,232 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
 2026-03-19 00:50:25,227 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:50:30,409 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:50:35,410 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:50:40,411 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:50:45,408 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:50:50,416 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:50:55,401 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:51:00,403 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:51:05,406 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:51:08,435 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S23.zip
+2026-03-19 00:51:08,436 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S77.zip
+2026-03-19 00:51:08,436 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S88.zip
+2026-03-19 00:51:08,436 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S94.zip
+2026-03-19 00:51:08,436 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S95.zip
+2026-03-19 00:51:08,436 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S99.zip
+2026-03-19 00:51:08,436 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\CD\WAFER_MAP\BACKUP\G39S23.zip
+2026-03-19 00:51:08,446 [INFO] 处理：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\G39S14.zip
+2026-03-19 00:51:14,452 [ERROR] 处理失败：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\G39S14.zip, err=ZIP 与 MAP 文件名前缀不一致：zip=G39S14.zip, map=G39S15-01.MAP
+Traceback (most recent call last):
+  File "C:\Users\Administrator\Desktop\nassync\main.py", line 436, in process
+    done = self._process(path)
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\Desktop\nassync\main.py", line 481, in _process
+    lot_wafer_pairs = self.extract(path, unzip_dir)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\Desktop\nassync\main.py", line 508, in extract
+    raise ValueError(
+ValueError: ZIP 与 MAP 文件名前缀不一致：zip=G39S14.zip, map=G39S15-01.MAP
+2026-03-19 00:51:14,457 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S12.zip
+2026-03-19 00:51:14,457 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S13.zip
+2026-03-19 00:51:14,457 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S78.zip
+2026-03-19 00:51:14,458 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S96.zip
+2026-03-19 00:51:14,458 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S97.zip
+2026-03-19 00:51:14,458 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S98.zip
+2026-03-19 00:51:14,459 [INFO] 启动监听...
+2026-03-19 00:51:15,396 [INFO] Web 监控已启动：http://0.0.0.0:8080/dashboard
+2026-03-19 00:51:15,415 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:51:20,413 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:51:25,423 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:51:44,411 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:52:03,136 [INFO] 处理：C:\Users\Administrator\Desktop\nassync\A\CD\WAFER_MAP\G39S99.zip
+2026-03-19 00:52:09,141 [ERROR] 处理失败：C:\Users\Administrator\Desktop\nassync\A\CD\WAFER_MAP\G39S99.zip, err=ZIP 与 MAP 文件名前缀不一致：zip=G39S99.zip, map=G39S95-01.MAP
+Traceback (most recent call last):
+  File "C:\Users\Administrator\Desktop\nassync\main.py", line 436, in process
+    done = self._process(path)
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\Desktop\nassync\main.py", line 481, in _process
+    lot_wafer_pairs = self.extract(path, unzip_dir)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\Desktop\nassync\main.py", line 508, in extract
+    raise ValueError(
+ValueError: ZIP 与 MAP 文件名前缀不一致：zip=G39S99.zip, map=G39S95-01.MAP
+2026-03-19 00:52:09,151 [INFO] 处理：C:\Users\Administrator\Desktop\nassync\A\CD\WAFER_MAP\G39S99.zip
+2026-03-19 00:52:15,157 [ERROR] 处理失败：C:\Users\Administrator\Desktop\nassync\A\CD\WAFER_MAP\G39S99.zip, err=ZIP 与 MAP 文件名前缀不一致：zip=G39S99.zip, map=G39S95-01.MAP
+Traceback (most recent call last):
+  File "C:\Users\Administrator\Desktop\nassync\main.py", line 436, in process
+    done = self._process(path)
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\Desktop\nassync\main.py", line 481, in _process
+    lot_wafer_pairs = self.extract(path, unzip_dir)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\Desktop\nassync\main.py", line 508, in extract
+    raise ValueError(
+ValueError: ZIP 与 MAP 文件名前缀不一致：zip=G39S99.zip, map=G39S95-01.MAP
+2026-03-19 00:52:34,379 [INFO] 处理：C:\Users\Administrator\Desktop\nassync\A\CD\WAFER_MAP\G39S99.zip
+2026-03-19 00:52:44,415 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:52:50,397 [INFO] 完成：C:\Users\Administrator\Desktop\nassync\A\CD\WAFER_MAP\G39S99.zip
+2026-03-19 00:52:50,400 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\CD\WAFER_MAP\__rzi_10696.39648.rartemp
+2026-03-19 00:52:50,400 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\CD\WAFER_MAP\__rzi_10696.39648.rartemp
+2026-03-19 00:52:50,403 [INFO] 跳过（文件不存在，可能已处理）：C:\Users\Administrator\Desktop\nassync\A\CD\WAFER_MAP\G39S99.zip
+2026-03-19 00:52:50,407 [INFO] 跳过（文件不存在，可能已处理）：C:\Users\Administrator\Desktop\nassync\A\CD\WAFER_MAP\G39S99.zip
+2026-03-19 00:52:50,410 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\CD\WAFER_MAP\__rzi_10696.39870.rartemp
+2026-03-19 00:52:50,410 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\CD\WAFER_MAP\__rzi_10696.39870.rartemp
+2026-03-19 00:52:50,412 [INFO] 跳过（文件不存在，可能已处理）：C:\Users\Administrator\Desktop\nassync\A\CD\WAFER_MAP\G39S99.zip
+2026-03-19 00:52:50,417 [INFO] 跳过（文件不存在，可能已处理）：C:\Users\Administrator\Desktop\nassync\A\CD\WAFER_MAP\G39S99.zip
+2026-03-19 00:52:50,419 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\CD\WAFER_MAP\__rzi_10696.40076.rartemp
+2026-03-19 00:52:50,419 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\CD\WAFER_MAP\__rzi_10696.40076.rartemp
+2026-03-19 00:52:50,422 [INFO] 跳过（文件不存在，可能已处理）：C:\Users\Administrator\Desktop\nassync\A\CD\WAFER_MAP\G39S99.zip
+2026-03-19 00:52:50,426 [INFO] 跳过（文件不存在，可能已处理）：C:\Users\Administrator\Desktop\nassync\A\CD\WAFER_MAP\G39S99.zip
+2026-03-19 00:52:50,428 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\CD\WAFER_MAP\BACKUP\G39S99.zip
+2026-03-19 00:52:50,428 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\CD\WAFER_MAP\BACKUP\G39S99.zip
+2026-03-19 00:53:44,411 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:54:20,435 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:54:20,667 [INFO] WEB 127.0.0.1 - "GET /dashboard HTTP/1.1" 200 -
+2026-03-19 00:54:20,795 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:54:25,804 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:54:27,350 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\__rzi_12864.383.rartemp
+2026-03-19 00:54:27,350 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\__rzi_12864.383.rartemp
+2026-03-19 00:54:27,353 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\__rzi_12864.383.rartemp
+2026-03-19 00:54:27,357 [INFO] 处理：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\G39S14.zip
+2026-03-19 00:54:29,357 [INFO] WEB 127.0.0.1 - "GET /dashboard HTTP/1.1" 200 -
+2026-03-19 00:54:29,415 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:54:30,344 [INFO] WEB 127.0.0.1 - "GET /dashboard HTTP/1.1" 200 -
+2026-03-19 00:54:30,399 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:54:30,845 [INFO] WEB 127.0.0.1 - "GET /dashboard HTTP/1.1" 200 -
+2026-03-19 00:54:30,907 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:54:31,084 [INFO] WEB 127.0.0.1 - "GET /dashboard HTTP/1.1" 200 -
+2026-03-19 00:54:31,139 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:54:32,017 [INFO] WEB 127.0.0.1 - "GET /dashboard HTTP/1.1" 200 -
+2026-03-19 00:54:32,076 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:54:33,343 [INFO] WEB 127.0.0.1 - "GET /dashboard HTTP/1.1" 200 -
+2026-03-19 00:54:33,362 [ERROR] 处理失败：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\G39S14.zip, err=ZIP 与 MAP 文件名前缀不一致：zip=G39S14.zip, map=G39S15-01.MAP
+Traceback (most recent call last):
+  File "C:\Users\Administrator\Desktop\nassync\main.py", line 436, in process
+    done = self._process(path)
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\Desktop\nassync\main.py", line 481, in _process
+    lot_wafer_pairs = self.extract(path, unzip_dir)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\Desktop\nassync\main.py", line 508, in extract
+    raise ValueError(
+ValueError: ZIP 与 MAP 文件名前缀不一致：zip=G39S14.zip, map=G39S15-01.MAP
+2026-03-19 00:54:33,381 [INFO] 处理：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\G39S14.zip
+2026-03-19 00:54:33,407 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:54:34,049 [INFO] WEB 127.0.0.1 - "GET /dashboard HTTP/1.1" 200 -
+2026-03-19 00:54:34,105 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:54:34,423 [INFO] WEB 127.0.0.1 - "GET /dashboard HTTP/1.1" 200 -
+2026-03-19 00:54:34,475 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:54:34,668 [INFO] WEB 127.0.0.1 - "GET /dashboard HTTP/1.1" 200 -
+2026-03-19 00:54:34,720 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:54:35,076 [INFO] WEB 127.0.0.1 - "GET /dashboard HTTP/1.1" 200 -
+2026-03-19 00:54:35,135 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:54:35,778 [INFO] WEB 127.0.0.1 - "GET /dashboard HTTP/1.1" 200 -
+2026-03-19 00:54:35,844 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:54:37,992 [INFO] WEB 127.0.0.1 - "GET /dashboard HTTP/1.1" 200 -
+2026-03-19 00:54:38,045 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:54:39,157 [INFO] WEB 127.0.0.1 - "GET /dashboard HTTP/1.1" 200 -
+2026-03-19 00:54:39,221 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:54:39,386 [ERROR] 处理失败：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\G39S14.zip, err=ZIP 与 MAP 文件名前缀不一致：zip=G39S14.zip, map=G39S15-01.MAP
+Traceback (most recent call last):
+  File "C:\Users\Administrator\Desktop\nassync\main.py", line 436, in process
+    done = self._process(path)
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\Desktop\nassync\main.py", line 481, in _process
+    lot_wafer_pairs = self.extract(path, unzip_dir)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\Desktop\nassync\main.py", line 508, in extract
+    raise ValueError(
+ValueError: ZIP 与 MAP 文件名前缀不一致：zip=G39S14.zip, map=G39S15-01.MAP
+2026-03-19 00:54:44,404 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:54:46,231 [INFO] WEB 127.0.0.1 - "GET /dashboard HTTP/1.1" 200 -
+2026-03-19 00:54:46,284 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:54:51,311 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:54:56,292 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:54:58,098 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\__rzi_12864.3457.rartemp
+2026-03-19 00:54:58,098 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\__rzi_12864.3457.rartemp
+2026-03-19 00:54:58,100 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\__rzi_12864.3457.rartemp
+2026-03-19 00:54:58,109 [INFO] 处理：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\G39S14.zip
+2026-03-19 00:55:01,286 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:55:02,579 [INFO] WEB 127.0.0.1 - "GET /dashboard HTTP/1.1" 200 -
+2026-03-19 00:55:02,636 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:55:07,642 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:55:08,126 [INFO] 完成：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\G39S14.zip
+2026-03-19 00:55:08,131 [INFO] 跳过（文件不存在，可能已处理）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\G39S14.zip
+2026-03-19 00:55:08,133 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\__rzi_12864.3684.rartemp
+2026-03-19 00:55:08,133 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\__rzi_12864.3684.rartemp
+2026-03-19 00:55:08,135 [INFO] 跳过（文件不存在，可能已处理）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\G39S14.zip
+2026-03-19 00:55:08,143 [INFO] 跳过（文件不存在，可能已处理）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\G39S14.zip
+2026-03-19 00:55:08,149 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S14.zip
+2026-03-19 00:55:08,149 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S14.zip
+2026-03-19 00:55:12,648 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:55:17,644 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:55:21,957 [INFO] 处理：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\G39S14.zip
+2026-03-19 00:55:22,653 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:55:26,424 [INFO] WEB 127.0.0.1 - "GET /dashboard HTTP/1.1" 200 -
+2026-03-19 00:55:26,485 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:55:26,937 [INFO] WEB 127.0.0.1 - "GET /dashboard HTTP/1.1" 200 -
+2026-03-19 00:55:27,000 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:55:27,153 [INFO] WEB 127.0.0.1 - "GET /dashboard HTTP/1.1" 200 -
+2026-03-19 00:55:27,219 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:55:27,978 [INFO] WEB 127.0.0.1 - "GET /dashboard HTTP/1.1" 200 -
+2026-03-19 00:55:27,981 [INFO] 完成：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\G39S14.zip
+2026-03-19 00:55:27,991 [INFO] 跳过（文件不存在，可能已处理）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\G39S14.zip
+2026-03-19 00:55:27,995 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S14.zip
+2026-03-19 00:55:28,045 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:55:28,226 [INFO] WEB 127.0.0.1 - "GET /dashboard HTTP/1.1" 200 -
+2026-03-19 00:55:28,284 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:55:28,495 [INFO] WEB 127.0.0.1 - "GET /dashboard HTTP/1.1" 200 -
+2026-03-19 00:55:28,548 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:55:28,838 [INFO] WEB 127.0.0.1 - "GET /dashboard HTTP/1.1" 200 -
+2026-03-19 00:55:28,894 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:55:29,384 [INFO] WEB 127.0.0.1 - "GET /dashboard HTTP/1.1" 200 -
+2026-03-19 00:55:29,440 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:55:29,631 [INFO] WEB 127.0.0.1 - "GET /dashboard HTTP/1.1" 200 -
+2026-03-19 00:55:29,683 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:55:35,408 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:55:40,398 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:55:45,402 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:55:50,402 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:55:55,412 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:56:00,406 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:56:03,041 [INFO] WEB 127.0.0.1 - "GET /dashboard HTTP/1.1" 200 -
+2026-03-19 00:56:03,116 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:56:04,008 [INFO] WEB 127.0.0.1 - "GET /dashboard HTTP/1.1" 200 -
+2026-03-19 00:56:04,063 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:56:04,464 [INFO] WEB 127.0.0.1 - "GET /dashboard HTTP/1.1" 200 -
+2026-03-19 00:56:04,520 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:56:09,540 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:56:13,357 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S14.zip
+2026-03-19 00:56:14,538 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:56:19,531 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:56:19,557 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S14\G39S14-01.MAP
+2026-03-19 00:56:19,558 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S14\G39S14-01.MAP
+2026-03-19 00:56:19,558 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S14\G39S14-01.MAP
+2026-03-19 00:56:19,558 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S14\G39S14-02.MAP
+2026-03-19 00:56:19,558 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S14\G39S14-02.MAP
+2026-03-19 00:56:23,201 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S14\G39S14-02 - 副本.MAP
+2026-03-19 00:56:23,201 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S14\G39S14-02 - 副本.MAP
+2026-03-19 00:56:24,547 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:56:27,487 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S14\G39S14-04.MAP
+2026-03-19 00:56:29,533 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:56:29,575 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S14\G39S14-03.MAP
+2026-03-19 00:56:34,529 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:56:39,258 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S14\G39S14.zip
+2026-03-19 00:56:39,261 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S14\G39S14.zip
+2026-03-19 00:56:39,532 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:56:41,376 [INFO] 处理：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\G39S14.zip
+2026-03-19 00:56:44,540 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:56:47,398 [INFO] 完成：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\G39S14.zip
+2026-03-19 00:56:47,411 [INFO] 跳过（文件不存在，可能已处理）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\G39S14.zip
+2026-03-19 00:56:47,417 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S14.zip
+2026-03-19 00:56:49,530 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:56:54,535 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:56:57,605 [INFO] WEB 127.0.0.1 - "GET /dashboard HTTP/1.1" 200 -
+2026-03-19 00:56:57,678 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:57:02,676 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:57:05,396 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 00:57:07,678 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 00:57:12,696 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 00:57:17,704 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 00:57:22,693 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 00:57:27,704 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 00:57:32,694 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 00:57:37,690 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 00:57:42,698 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 00:57:47,689 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 00:57:52,692 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 00:57:57,686 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 00:58:03,420 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 00:58:08,399 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 00:58:13,413 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 00:58:18,409 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 00:58:23,404 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 00:58:28,419 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 00:58:33,422 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 00:58:38,406 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 00:58:43,424 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 00:58:48,403 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 00:58:53,423 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 00:58:58,419 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 00:59:36,006 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 00:59:37,683 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 00:59:42,688 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 00:59:47,685 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 00:59:52,688 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 00:59:57,693 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 01:00:03,418 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 01:00:08,420 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 01:00:13,398 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 01:00:18,406 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 01:00:23,414 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
+2026-03-19 01:00:28,407 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q=G39S14 HTTP/1.1" 200 -
