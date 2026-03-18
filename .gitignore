@@ -1,4 +1,4 @@
-*.zip
-logs
-A
-B
+/logs/
+/A/
+/B/
+/logs/

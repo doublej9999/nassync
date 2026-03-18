@@ -4,6 +4,7 @@ import logging.handlers
 import os
 import re
 import shutil
+import sys
 import tempfile
 import threading
 import time
@@ -50,7 +51,61 @@ class Config:
     WEB_PORT: int = 8080
 
 
-CONFIG = Config()
+def _app_base_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+def _to_bool(val):
+    if isinstance(val, bool):
+        return val
+    if val is None:
+        return False
+    return str(val).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def load_config() -> Config:
+    default_cfg = Config()
+    cfg_path = Path(os.getenv("NASSYNC_CONFIG", _app_base_dir() / "config.json"))
+
+    if not cfg_path.exists():
+        print(f"[配置] 未找到配置文件，使用默认配置: {cfg_path}")
+        return default_cfg
+
+    try:
+        with cfg_path.open("r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception as e:
+        print(f"[配置] 读取配置失败，使用默认配置: {e}")
+        return default_cfg
+
+    if not isinstance(raw, dict):
+        print("[配置] 配置文件格式错误（需为 JSON 对象），使用默认配置")
+        return default_cfg
+
+    merged = dict(default_cfg.__dict__)
+    merged.update({k: v for k, v in raw.items() if k in merged})
+
+    # 类型转换，确保外部 JSON 配置能正确映射
+    merged["WATCH_DIR"] = Path(merged["WATCH_DIR"])
+    merged["TARGET_DIR"] = Path(merged["TARGET_DIR"])
+    merged["LOG_DIR"] = Path(merged["LOG_DIR"])
+    merged["DB_PORT"] = int(merged["DB_PORT"])
+    merged["FILE_STABLE_CHECK_TIMES"] = int(merged["FILE_STABLE_CHECK_TIMES"])
+    merged["FILE_STABLE_CHECK_INTERVAL_SEC"] = float(
+        merged["FILE_STABLE_CHECK_INTERVAL_SEC"]
+    )
+    merged["PROCESS_RETRY_TIMES"] = int(merged["PROCESS_RETRY_TIMES"])
+    merged["PROCESS_RETRY_INTERVAL_SEC"] = float(merged["PROCESS_RETRY_INTERVAL_SEC"])
+    merged["INITIAL_SCAN"] = _to_bool(merged["INITIAL_SCAN"])
+    merged["WEB_PORT"] = int(merged["WEB_PORT"])
+
+    print(f"[配置] 已加载配置文件: {cfg_path}")
+    return Config(**merged)
+
+
+CONFIG = load_config()
 
 
 # =========================
