@@ -71,7 +71,19 @@ pip install psycopg2-binary watchdog
 
 ## 5. 配置说明
 
-当前配置在 `main.py` 的 `Config` 数据类中（默认是硬编码路径与数据库连接）：
+程序支持**外置 JSON 配置**，默认按以下优先级读取：
+
+1. 环境变量 `NASSYNC_CONFIG` 指向的配置文件
+2. 程序目录下 `config.json`
+3. 若都不存在，则回退到内置默认值
+
+建议做法：
+
+1. 复制 `config.example.json` 为 `config.json`
+2. 修改目录、数据库与端口配置
+3. 重启程序生效
+
+核心配置项：
 
 - 目录配置：`WATCH_DIR`、`TARGET_DIR`
 - 数据库配置：`DB_HOST`、`DB_PORT`、`DB_NAME`、`DB_SCHEMA`、`DB_USER`、`DB_PASSWORD`
@@ -80,6 +92,27 @@ pip install psycopg2-binary watchdog
   - `PROCESS_RETRY_TIMES` / `PROCESS_RETRY_INTERVAL_SEC`
   - `INITIAL_SCAN`（启动时是否扫描历史 ZIP）
 - Web 面板：`WEB_HOST`、`WEB_PORT`
+
+示例：
+
+```json
+{
+  "WATCH_DIR": "D:\\A",
+  "TARGET_DIR": "D:\\B",
+  "DB_HOST": "127.0.0.1",
+  "DB_PORT": 5432,
+  "DB_NAME": "postgres",
+  "DB_SCHEMA": "public",
+  "DB_USER": "postgres",
+  "DB_PASSWORD": "123456",
+  "DB_TABLE": "zip_record",
+  "DB_TASK_TABLE": "zip_task_status",
+  "LOG_DIR": ".\\logs",
+  "INITIAL_SCAN": true,
+  "WEB_HOST": "0.0.0.0",
+  "WEB_PORT": 8080
+}
+```
 
 ## 6. 启动方式
 
@@ -94,13 +127,29 @@ python main.py
 - 文件监听服务（watchdog）
 - Web 监控服务（默认 `http://0.0.0.0:8080/dashboard`）
 
-### 6.2 打包运行（可选）
+### 6.2 打包运行（Windows EXE）
 
 ```bash
 pyinstaller nassync.spec
 ```
 
-生成可执行文件后，运行 `dist/nassync.exe`。
+生成可执行文件后，发布目录至少包含：
+
+- `dist/nassync.exe`
+- `dist/config.json`（可从 `config.example.json` 复制）
+
+然后运行：
+
+```bash
+dist/nassync.exe
+```
+
+如果配置文件不在 exe 同目录，可用环境变量指定：
+
+```bash
+set NASSYNC_CONFIG=D:\deploy\nassync\config.json
+dist\nassync.exe
+```
 
 ## 7. Web 监控接口
 
@@ -138,7 +187,7 @@ pyinstaller nassync.spec
 
 ## 10. 后续改进建议
 
-- 将硬编码配置改为 `.env` 或 `yaml`
+- 增加配置项校验（启动前检查目录存在性、端口范围、数据库连通性）
 - 增加 `requirements.txt`
 - 增加单元测试（命名校验、路径校验、重试逻辑）
 - 增加健康检查接口（如 `/healthz`）
