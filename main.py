@@ -177,7 +177,17 @@ class Processor:
             self.processing.add(key)
 
         try:
-            self._process(path)
+            for i in range(self.cfg.PROCESS_RETRY_TIMES):
+                done = self._process(path)
+                if done:
+                    break
+                if i < self.cfg.PROCESS_RETRY_TIMES - 1:
+                    logger.info(
+                        f"文件未稳定，准备重试：{path} ({i + 1}/{self.cfg.PROCESS_RETRY_TIMES})"
+                    )
+                    time.sleep(self.cfg.PROCESS_RETRY_INTERVAL_SEC)
+            else:
+                logger.warning(f"处理放弃（重试后仍未稳定）：{path}")
         except Exception as ex:
             # 避免事件回调线程因未捕获异常中断，记录后继续监听
             logger.exception(f"处理失败：{path}, err={ex}")
@@ -186,10 +196,15 @@ class Processor:
                 self.processing.remove(key)
 
     def _process(self, path: Path):
+        # 文件已被其他并发事件处理并移走时，视为当前事件无需再处理
+        if not path.exists():
+            logger.info(f"跳过（文件不存在，可能已处理）：{path}")
+            return True
+
         logger.info(f"处理：{path}")
 
         if not self.wait_stable(path):
-            raise Exception("文件未稳定")
+            return False
 
         rel = path.relative_to(self.cfg.WATCH_DIR)
 
@@ -207,6 +222,7 @@ class Processor:
         shutil.move(str(path), str(backup_dir / path.name))
 
         logger.info(f"完成：{path}")
+        return True
 
     def extract(self, zip_path, target_dir, lot_id):
         with tempfile.TemporaryDirectory() as tmp:

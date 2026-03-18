@@ -8,3 +8,76 @@
 2026-03-19 00:00:51,393 [INFO] 完成：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\G39S96.zip
 2026-03-19 00:00:51,394 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S96.zip
 2026-03-19 00:00:51,395 [INFO] 启动监听...
+2026-03-19 00:04:04,012 [INFO] 处理：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\G39S96.zip
+2026-03-19 00:04:10,026 [INFO] 完成：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\G39S96.zip
+2026-03-19 00:04:10,027 [INFO] 处理：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\G39S96.zip
+2026-03-19 00:04:10,027 [ERROR] 处理失败：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\G39S96.zip, err=文件未稳定
+Traceback (most recent call last):
+  File "C:\Users\Administrator\Desktop\nassync\main.py", line 180, in process
+    self._process(path)
+  File "C:\Users\Administrator\Desktop\nassync\main.py", line 192, in _process
+    raise Exception("文件未稳定")
+Exception: 文件未稳定
+2026-03-19 00:04:10,028 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S96.zip
+2026-03-19 00:04:10,028 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S96.zip
+2026-03-19 00:04:17,984 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S94.zip
+2026-03-19 00:04:17,984 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S95.zip
+2026-03-19 00:04:17,985 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S96.zip
+2026-03-19 00:04:17,991 [INFO] 启动监听...
+2026-03-19 00:04:42,595 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S96.zip
+2026-03-19 00:05:03,786 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S96 - 副本.zip
+2026-03-19 00:05:03,786 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S96 - 副本.zip
+2026-03-19 00:05:03,786 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S96 - 副本.zip
+2026-03-19 00:05:05,102 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S96 - 副本.zip
+2026-03-19 00:05:10,011 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S97.zip
+2026-03-19 00:05:10,011 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S97.zip
+2026-03-19 00:05:11,931 [INFO] 处理：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\G39S97.zip
+2026-03-19 00:05:17,952 [INFO] 完成：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\G39S97.zip
+2026-03-19 00:05:17,952 [INFO] 处理：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\G39S97.zip
+2026-03-19 00:05:17,952 [ERROR] 处理失败：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\G39S97.zip, err=文件未稳定
+Traceback (most recent call last):
+  File "C:\Users\Administrator\Desktop\nassync\main.py", line 180, in process
+    self._process(path)
+  File "C:\Users\Administrator\Desktop\nassync\main.py", line 192, in _process
+    raise Exception("文件未稳定")
+Exception: 文件未稳定
+2026-03-19 00:05:17,954 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S97.zip
+2026-03-19 00:05:17,954 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S97.zip
+2026-03-19 00:08:33,674 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S94.zip
+2026-03-19 00:08:33,674 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S95.zip
+2026-03-19 00:08:33,675 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S96.zip
+2026-03-19 00:08:33,675 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S97.zip
+2026-03-19 00:08:33,675 [INFO] 启动监听...
+2026-03-19 00:08:40,440 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S97 - 副本.zip
+2026-03-19 00:08:40,440 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S97 - 副本.zip
+2026-03-19 00:08:40,440 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S97 - 副本.zip
+2026-03-19 00:08:45,065 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S98.zip
+2026-03-19 00:08:45,066 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S98.zip
+2026-03-19 00:08:47,845 [INFO] 处理：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\G39S98.zip
+2026-03-19 00:08:53,868 [INFO] 完成：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\G39S98.zip
+2026-03-19 00:08:53,869 [INFO] 跳过（文件不存在，可能已处理）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\G39S98.zip
+2026-03-19 00:08:53,869 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S98.zip
+2026-03-19 00:08:53,869 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S98.zip
+2026-03-19 00:10:30,027 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S95 - 副本.zip
+2026-03-19 00:10:30,027 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S95 - 副本.zip
+2026-03-19 00:10:30,028 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S95 - 副本.zip
+2026-03-19 00:10:35,584 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S99.zip
+2026-03-19 00:10:35,585 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S99.zip
+2026-03-19 00:10:37,568 [INFO] 处理：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\G39S99.zip
+2026-03-19 00:10:43,586 [INFO] 完成：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\G39S99.zip
+2026-03-19 00:10:43,586 [INFO] 跳过（文件不存在，可能已处理）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\G39S99.zip
+2026-03-19 00:10:43,587 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S99.zip
+2026-03-19 00:10:43,587 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S99.zip
+2026-03-19 00:10:46,848 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S94.zip
+2026-03-19 00:10:46,848 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S95.zip
+2026-03-19 00:10:46,848 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S99.zip
+2026-03-19 00:10:46,849 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S96.zip
+2026-03-19 00:10:46,849 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S97.zip
+2026-03-19 00:10:46,849 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S98.zip
+2026-03-19 00:10:46,851 [INFO] 启动监听...
+2026-03-19 00:10:55,230 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S99 - 副本.zip
+2026-03-19 00:10:55,230 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S99 - 副本.zip
+2026-03-19 00:10:55,231 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S99 - 副本.zip
+2026-03-19 00:11:03,792 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S23.zip
+2026-03-19 00:11:03,793 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S23.zip
+2026-03-19 00:11:06,827 [INFO] 处理：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\G39S23.zip
