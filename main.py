@@ -2,6 +2,7 @@
 import logging
 import logging.handlers
 import os
+import re
 import shutil
 import tempfile
 import threading
@@ -197,21 +198,58 @@ class PgClient:
         finally:
             self.pool.putconn(conn)
 
-    def get_recent_tasks(self, limit=20):
+    def get_recent_tasks(self, page=1, page_size=20, keyword=""):
+        page = max(1, int(page or 1))
+        page_size = max(1, min(int(page_size or 20), 100))
+        offset = (page - 1) * page_size
+        kw = (keyword or "").strip()
+
         conn = self.pool.getconn()
         try:
             with conn.cursor() as cur:
-                cur.execute(
-                    f"""
-                    SELECT type, zip_name, status, error_msg, zip_path, updated_at
-                    FROM {self.cfg.DB_TASK_TABLE}
-                    ORDER BY updated_at DESC
-                    LIMIT %s
-                    """,
-                    (limit,),
-                )
+                if kw:
+                    like_kw = f"%{kw}%"
+                    where_sql = """
+                    WHERE type ILIKE %s
+                       OR zip_name ILIKE %s
+                       OR status ILIKE %s
+                       OR COALESCE(error_msg, '') ILIKE %s
+                       OR zip_path ILIKE %s
+                    """
+                    params = (like_kw, like_kw, like_kw, like_kw, like_kw)
+                    cur.execute(
+                        f"""
+                        SELECT COUNT(*)
+                        FROM {self.cfg.DB_TASK_TABLE}
+                        {where_sql}
+                        """,
+                        params,
+                    )
+                    (total,) = cur.fetchone()
+                    cur.execute(
+                        f"""
+                        SELECT type, zip_name, status, error_msg, zip_path, updated_at
+                        FROM {self.cfg.DB_TASK_TABLE}
+                        {where_sql}
+                        ORDER BY updated_at DESC
+                        LIMIT %s OFFSET %s
+                        """,
+                        params + (page_size, offset),
+                    )
+                else:
+                    cur.execute(f"SELECT COUNT(*) FROM {self.cfg.DB_TASK_TABLE}")
+                    (total,) = cur.fetchone()
+                    cur.execute(
+                        f"""
+                        SELECT type, zip_name, status, error_msg, zip_path, updated_at
+                        FROM {self.cfg.DB_TASK_TABLE}
+                        ORDER BY updated_at DESC
+                        LIMIT %s OFFSET %s
+                        """,
+                        (page_size, offset),
+                    )
                 rows = cur.fetchall()
-            return [
+            items = [
                 {
                     "type": row[0],
                     "zip_name": row[1],
@@ -224,24 +262,69 @@ class PgClient:
                 }
                 for row in rows
             ]
+            total_pages = max(1, (total + page_size - 1) // page_size) if total else 1
+            return {
+                "items": items,
+                "page": page,
+                "page_size": page_size,
+                "total": total or 0,
+                "total_pages": total_pages,
+                "q": kw,
+            }
         finally:
             self.pool.putconn(conn)
 
-    def get_recent_records(self, limit=20):
+    def get_recent_records(self, page=1, page_size=20, keyword=""):
+        page = max(1, int(page or 1))
+        page_size = max(1, min(int(page_size or 20), 100))
+        offset = (page - 1) * page_size
+        kw = (keyword or "").strip()
+
         conn = self.pool.getconn()
         try:
             with conn.cursor() as cur:
-                cur.execute(
-                    f"""
-                    SELECT type, lot_id, wafer_id, zip_name, created_at
-                    FROM {self.cfg.DB_TABLE}
-                    ORDER BY created_at DESC
-                    LIMIT %s
-                    """,
-                    (limit,),
-                )
+                if kw:
+                    like_kw = f"%{kw}%"
+                    where_sql = """
+                    WHERE type ILIKE %s
+                       OR lot_id ILIKE %s
+                       OR wafer_id ILIKE %s
+                       OR zip_name ILIKE %s
+                    """
+                    params = (like_kw, like_kw, like_kw, like_kw)
+                    cur.execute(
+                        f"""
+                        SELECT COUNT(*)
+                        FROM {self.cfg.DB_TABLE}
+                        {where_sql}
+                        """,
+                        params,
+                    )
+                    (total,) = cur.fetchone()
+                    cur.execute(
+                        f"""
+                        SELECT type, lot_id, wafer_id, zip_name, created_at
+                        FROM {self.cfg.DB_TABLE}
+                        {where_sql}
+                        ORDER BY created_at DESC
+                        LIMIT %s OFFSET %s
+                        """,
+                        params + (page_size, offset),
+                    )
+                else:
+                    cur.execute(f"SELECT COUNT(*) FROM {self.cfg.DB_TABLE}")
+                    (total,) = cur.fetchone()
+                    cur.execute(
+                        f"""
+                        SELECT type, lot_id, wafer_id, zip_name, created_at
+                        FROM {self.cfg.DB_TABLE}
+                        ORDER BY created_at DESC
+                        LIMIT %s OFFSET %s
+                        """,
+                        (page_size, offset),
+                    )
                 rows = cur.fetchall()
-            return [
+            items = [
                 {
                     "type": row[0],
                     "lot_id": row[1],
@@ -253,6 +336,15 @@ class PgClient:
                 }
                 for row in rows
             ]
+            total_pages = max(1, (total + page_size - 1) // page_size) if total else 1
+            return {
+                "items": items,
+                "page": page,
+                "page_size": page_size,
+                "total": total or 0,
+                "total_pages": total_pages,
+                "q": kw,
+            }
         finally:
             self.pool.putconn(conn)
 
@@ -386,6 +478,7 @@ class Processor:
                 z.extractall(tmp)
 
             lot_wafer_pairs = []
+            map_name_pattern = re.compile(r"^([A-Za-z0-9]{5})-([A-Za-z0-9]{2})$")
 
             for root, _, files in os.walk(tmp):
                 for f in files:
@@ -393,16 +486,14 @@ class Processor:
                         continue
 
                     stem = Path(f).stem
-                    parts = stem.split("-", 2)
-                    if len(parts) < 2:
-                        logger.warning(f"跳过（MAP 文件名不符合 lot-wafer 规则）：{f}")
-                        continue
+                    match = map_name_pattern.match(stem)
+                    if not match:
+                        raise ValueError(
+                            f"MAP 文件名格式错误：{f}，期望格式为 XXXXX-XX"
+                        )
 
-                    lot_id = parts[0].strip().upper()
-                    wafer_id = parts[1].strip().upper()
-                    if not lot_id or not wafer_id:
-                        logger.warning(f"跳过（MAP 文件名 lot/wafer 为空）：{f}")
-                        continue
+                    lot_id = match.group(1).upper()
+                    wafer_id = match.group(2).upper()
 
                     lot_wafer_pairs.append((lot_id, wafer_id))
 
@@ -467,6 +558,11 @@ DASHBOARD_HTML = """<!doctype html>
     .warn { color: var(--warn); }
     .err { color: var(--err); }
     .section { margin-top: 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+    .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; align-items: center; }
+    .toolbar input, .toolbar select { border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font-size: 13px; background: #fff; }
+    .toolbar button { border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 13px; background: #fff; cursor: pointer; }
+    .toolbar button:disabled { color: #9ca3af; cursor: not-allowed; }
+    .pager { color: var(--muted); font-size: 12px; }
     h2 { font-size: 16px; margin: 0 0 12px; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { padding: 10px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
@@ -502,6 +598,18 @@ DASHBOARD_HTML = """<!doctype html>
 
     <div class=\"section\">
       <h2>最近任务</h2>
+      <div class=\"toolbar\">
+        <input id=\"task_q\" type=\"text\" placeholder=\"搜索类型/压缩包/状态/错误信息/路径\">
+        <select id=\"task_page_size\">
+          <option value=\"10\">10 条/页</option>
+          <option value=\"20\" selected>20 条/页</option>
+          <option value=\"50\">50 条/页</option>
+        </select>
+        <button id=\"task_search_btn\" type=\"button\">搜索</button>
+        <button id=\"task_prev_btn\" type=\"button\">上一页</button>
+        <button id=\"task_next_btn\" type=\"button\">下一页</button>
+        <span id=\"task_pager\" class=\"pager\">第 -/- 页，共 0 条</span>
+      </div>
       <table>
         <thead><tr><th>时间</th><th>类型</th><th>压缩包</th><th>状态</th><th>错误信息</th></tr></thead>
         <tbody id=\"task_tbody\"></tbody>
@@ -510,6 +618,18 @@ DASHBOARD_HTML = """<!doctype html>
 
     <div class=\"section\">
       <h2>最近入库记录</h2>
+      <div class=\"toolbar\">
+        <input id=\"record_q\" type=\"text\" placeholder=\"搜索类型/LOT/WAFER/来源压缩包\">
+        <select id=\"record_page_size\">
+          <option value=\"10\">10 条/页</option>
+          <option value=\"20\" selected>20 条/页</option>
+          <option value=\"50\">50 条/页</option>
+        </select>
+        <button id=\"record_search_btn\" type=\"button\">搜索</button>
+        <button id=\"record_prev_btn\" type=\"button\">上一页</button>
+        <button id=\"record_next_btn\" type=\"button\">下一页</button>
+        <span id=\"record_pager\" class=\"pager\">第 -/- 页，共 0 条</span>
+      </div>
       <table>
         <thead><tr><th>时间</th><th>类型</th><th>LOT</th><th>WAFER</th><th>来源压缩包</th></tr></thead>
         <tbody id=\"record_tbody\"></tbody>
@@ -523,13 +643,26 @@ DASHBOARD_HTML = """<!doctype html>
   </div>
 
   <script>
+    const state = {
+      task: { page: 1, page_size: 20, q: '' },
+      record: { page: 1, page_size: 20, q: '' },
+    };
+
     function esc(v) {
       if (v === null || v === undefined) return '';
       return String(v).replace(/[&<>\"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[m]));
     }
 
     async function loadData() {
-      const resp = await fetch('/api/dashboard');
+      const params = new URLSearchParams({
+        task_page: String(state.task.page),
+        task_page_size: String(state.task.page_size),
+        task_q: state.task.q,
+        record_page: String(state.record.page),
+        record_page_size: String(state.record.page_size),
+        record_q: state.record.q,
+      });
+      const resp = await fetch('/api/dashboard?' + params.toString());
       const data = await resp.json();
       const s = data.summary || {};
 
@@ -547,7 +680,9 @@ DASHBOARD_HTML = """<!doctype html>
         </tr>
       `).join('');
 
-      document.getElementById('task_tbody').innerHTML = (data.recent_tasks || []).map(x => `
+      const taskData = data.recent_tasks || {};
+      const taskItems = taskData.items || [];
+      document.getElementById('task_tbody').innerHTML = taskItems.map(x => `
         <tr>
           <td>${esc(x.updated_at || '-')}</td>
           <td>${esc(x.type)}</td>
@@ -556,8 +691,13 @@ DASHBOARD_HTML = """<!doctype html>
           <td>${esc(x.error_msg || '-')}</td>
         </tr>
       `).join('');
+      document.getElementById('task_pager').textContent = `第 ${taskData.page || 1}/${taskData.total_pages || 1} 页，共 ${taskData.total || 0} 条`;
+      document.getElementById('task_prev_btn').disabled = (taskData.page || 1) <= 1;
+      document.getElementById('task_next_btn').disabled = (taskData.page || 1) >= (taskData.total_pages || 1);
 
-      document.getElementById('record_tbody').innerHTML = (data.recent_records || []).map(x => `
+      const recordData = data.recent_records || {};
+      const recordItems = recordData.items || [];
+      document.getElementById('record_tbody').innerHTML = recordItems.map(x => `
         <tr>
           <td>${esc(x.created_at || '-')}</td>
           <td>${esc(x.type)}</td>
@@ -566,6 +706,9 @@ DASHBOARD_HTML = """<!doctype html>
           <td class=\"mono\">${esc(x.zip_name)}</td>
         </tr>
       `).join('');
+      document.getElementById('record_pager').textContent = `第 ${recordData.page || 1}/${recordData.total_pages || 1} 页，共 ${recordData.total || 0} 条`;
+      document.getElementById('record_prev_btn').disabled = (recordData.page || 1) <= 1;
+      document.getElementById('record_next_btn').disabled = (recordData.page || 1) >= (recordData.total_pages || 1);
 
       document.getElementById('refresh_time').textContent = '更新时间：' + esc(data.generated_at || '-');
     }
@@ -578,6 +721,64 @@ DASHBOARD_HTML = """<!doctype html>
       }
     }
 
+    function bindToolbar() {
+      const taskQ = document.getElementById('task_q');
+      const taskPageSize = document.getElementById('task_page_size');
+      const recordQ = document.getElementById('record_q');
+      const recordPageSize = document.getElementById('record_page_size');
+
+      document.getElementById('task_search_btn').addEventListener('click', () => {
+        state.task.q = taskQ.value.trim();
+        state.task.page_size = Number(taskPageSize.value) || 20;
+        state.task.page = 1;
+        tick();
+      });
+      taskQ.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') document.getElementById('task_search_btn').click();
+      });
+      taskPageSize.addEventListener('change', () => {
+        state.task.page_size = Number(taskPageSize.value) || 20;
+        state.task.page = 1;
+        tick();
+      });
+      document.getElementById('task_prev_btn').addEventListener('click', () => {
+        if (state.task.page > 1) {
+          state.task.page -= 1;
+          tick();
+        }
+      });
+      document.getElementById('task_next_btn').addEventListener('click', () => {
+        state.task.page += 1;
+        tick();
+      });
+
+      document.getElementById('record_search_btn').addEventListener('click', () => {
+        state.record.q = recordQ.value.trim();
+        state.record.page_size = Number(recordPageSize.value) || 20;
+        state.record.page = 1;
+        tick();
+      });
+      recordQ.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') document.getElementById('record_search_btn').click();
+      });
+      recordPageSize.addEventListener('change', () => {
+        state.record.page_size = Number(recordPageSize.value) || 20;
+        state.record.page = 1;
+        tick();
+      });
+      document.getElementById('record_prev_btn').addEventListener('click', () => {
+        if (state.record.page > 1) {
+          state.record.page -= 1;
+          tick();
+        }
+      });
+      document.getElementById('record_next_btn').addEventListener('click', () => {
+        state.record.page += 1;
+        tick();
+      });
+    }
+
+    bindToolbar();
     tick();
     setInterval(tick, 5000);
   </script>
@@ -613,20 +814,31 @@ def create_dashboard_handler(pg: PgClient):
             if parsed.path == "/api/dashboard":
                 qs = parse_qs(parsed.query or "")
                 try:
-                    task_limit = max(1, min(int((qs.get("task_limit") or ["20"])[0]), 100))
-                    record_limit = max(
-                        1, min(int((qs.get("record_limit") or ["20"])[0]), 100)
+                    task_page = max(1, int((qs.get("task_page") or ["1"])[0]))
+                    task_page_size = max(
+                        1, min(int((qs.get("task_page_size") or ["20"])[0]), 100)
                     )
+                    task_q = (qs.get("task_q") or [""])[0]
+
+                    record_page = max(1, int((qs.get("record_page") or ["1"])[0]))
+                    record_page_size = max(
+                        1, min(int((qs.get("record_page_size") or ["20"])[0]), 100)
+                    )
+                    record_q = (qs.get("record_q") or [""])[0]
                 except ValueError:
                     self._send_json(
-                        {"error": "task_limit 和 record_limit 必须是数字"},
+                        {"error": "分页参数必须是数字"},
                         status=HTTPStatus.BAD_REQUEST,
                     )
                     return
 
                 data = pg.get_dashboard_metrics()
-                data["recent_tasks"] = pg.get_recent_tasks(task_limit)
-                data["recent_records"] = pg.get_recent_records(record_limit)
+                data["recent_tasks"] = pg.get_recent_tasks(
+                    page=task_page, page_size=task_page_size, keyword=task_q
+                )
+                data["recent_records"] = pg.get_recent_records(
+                    page=record_page, page_size=record_page_size, keyword=record_q
+                )
                 self._send_json(data)
                 return
 

@@ -200,3 +200,84 @@ Exception: 文件未稳定
 2026-03-19 00:28:54,429 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
 2026-03-19 00:28:59,425 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
 2026-03-19 00:29:04,446 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:29:10,610 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:29:15,401 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:29:20,399 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:29:25,395 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:29:29,706 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:29:34,439 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:29:39,451 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:29:44,446 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:29:49,459 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:29:54,429 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:29:56,283 [INFO] WEB 127.0.0.1 - "GET /dashboard HTTP/1.1" 200 -
+2026-03-19 00:29:56,428 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:30:01,536 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:30:06,434 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:30:12,414 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:30:17,406 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:30:22,401 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:30:26,644 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:30:31,433 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:30:36,437 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:30:41,441 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:30:46,436 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:30:51,447 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:30:56,438 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:31:01,440 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:31:06,438 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:31:11,443 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:31:16,451 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:31:21,432 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:31:26,443 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:31:31,445 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:31:36,447 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:31:41,444 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:31:46,445 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:31:51,451 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:31:56,447 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:32:01,452 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:32:06,445 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:32:11,443 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:32:16,445 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:32:21,446 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:32:26,442 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:32:31,442 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:32:36,441 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:32:39,764 [INFO] WEB 127.0.0.1 - "GET /dashboard HTTP/1.1" 200 -
+2026-03-19 00:32:39,841 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:32:44,853 [INFO] WEB 127.0.0.1 - "GET /api/dashboard HTTP/1.1" 200 -
+2026-03-19 00:32:51,134 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S23.zip
+2026-03-19 00:32:51,134 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S77.zip
+2026-03-19 00:32:51,134 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S88.zip
+2026-03-19 00:32:51,135 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S94.zip
+2026-03-19 00:32:51,135 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S95.zip
+2026-03-19 00:32:51,135 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP\BACKUP\G39S99.zip
+2026-03-19 00:32:51,135 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S78.zip
+2026-03-19 00:32:51,135 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S96.zip
+2026-03-19 00:32:51,135 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S97.zip
+2026-03-19 00:32:51,135 [INFO] 跳过（不符合规则）：C:\Users\Administrator\Desktop\nassync\A\FBP\WAFER_MAP\BACKUP\G39S98.zip
+2026-03-19 00:32:51,136 [INFO] 启动监听...
+2026-03-19 00:32:52,084 [INFO] Web 监控已启动：http://0.0.0.0:8080/dashboard
+2026-03-19 00:32:53,893 [INFO] WEB 127.0.0.1 - "GET /dashboard HTTP/1.1" 200 -
+2026-03-19 00:32:53,949 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:32:58,959 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:32:59,732 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=10&record_q= HTTP/1.1" 200 -
+2026-03-19 00:33:00,786 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=20&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:33:02,884 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=10&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:33:03,970 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=10&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:33:08,219 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=10&task_q=G39S78&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:33:08,953 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=10&task_q=G39S78&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:33:10,492 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=10&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:33:13,957 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=10&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:33:18,966 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=10&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:33:23,951 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=10&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:33:28,964 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=10&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:33:33,966 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=10&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:33:38,957 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=10&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:33:43,964 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=10&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:33:48,954 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=10&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:33:53,955 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=10&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:33:58,957 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=10&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:34:03,959 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=10&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
+2026-03-19 00:34:08,965 [INFO] WEB 127.0.0.1 - "GET /api/dashboard?task_page=1&task_page_size=10&task_q=&record_page=1&record_page_size=20&record_q= HTTP/1.1" 200 -
