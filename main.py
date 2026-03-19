@@ -45,6 +45,9 @@ class Config:
     PROCESS_RETRY_TIMES: int = 3
     PROCESS_RETRY_INTERVAL_SEC: float = 3.0
 
+    CHECK_ZIP_MAP_SAME_PREFIX: bool = True
+    CHECK_MAP_FILENAME_FORMAT: bool = True
+
     INITIAL_SCAN: bool = True
 
     WEB_HOST: str = "0.0.0.0"
@@ -98,6 +101,8 @@ def load_config() -> Config:
     )
     merged["PROCESS_RETRY_TIMES"] = int(merged["PROCESS_RETRY_TIMES"])
     merged["PROCESS_RETRY_INTERVAL_SEC"] = float(merged["PROCESS_RETRY_INTERVAL_SEC"])
+    merged["CHECK_ZIP_MAP_SAME_PREFIX"] = _to_bool(merged["CHECK_ZIP_MAP_SAME_PREFIX"])
+    merged["CHECK_MAP_FILENAME_FORMAT"] = _to_bool(merged["CHECK_MAP_FILENAME_FORMAT"])
     merged["INITIAL_SCAN"] = _to_bool(merged["INITIAL_SCAN"])
     merged["WEB_PORT"] = int(merged["WEB_PORT"])
 
@@ -177,7 +182,8 @@ class PgClient:
                 INSERT INTO {self.cfg.DB_TABLE}
                 (type, lot_id, wafer_id, zip_name, zip_path)
                 VALUES (%s,%s,%s,%s,%s)
-                ON CONFLICT (type, lot_id, wafer_id) DO NOTHING
+                ON CONFLICT (type, lot_id, wafer_id) DO UPDATE SET
+                  created_at = NOW()
                 """
                 data = [
                     (rec_type, lot_id, wafer_id, zip_name, zip_path)
@@ -558,20 +564,28 @@ class Processor:
                         continue
 
                     stem = Path(f).stem
-                    map_prefix = stem.split("-", 1)[0].upper()
-                    if map_prefix != zip_prefix:
-                        raise ValueError(
-                            f"ZIP 与 MAP 文件名前缀不一致：zip={Path(zip_path).name}, map={f}"
-                        )
+                    if self.cfg.CHECK_ZIP_MAP_SAME_PREFIX:
+                        map_prefix = stem.split("-", 1)[0].upper()
+                        if map_prefix != zip_prefix:
+                            raise ValueError(
+                                f"ZIP 与 MAP 文件名前缀不一致：zip={Path(zip_path).name}, map={f}"
+                            )
 
                     match = map_name_pattern.match(stem)
-                    if not match:
+                    if self.cfg.CHECK_MAP_FILENAME_FORMAT and not match:
                         raise ValueError(
                             f"MAP 文件名格式错误：{f}，期望格式为 XXXXXX-XX"
                         )
 
-                    lot_id = match.group(1).upper()
-                    wafer_id = match.group(2).upper()
+                    if match:
+                        lot_id = match.group(1).upper()
+                        wafer_id = match.group(2).upper()
+                    else:
+                        parts = stem.split("-", 1)
+                        lot_id = (parts[0] if parts and parts[0] else "UNKNOWN").upper()
+                        wafer_id = (
+                            parts[1] if len(parts) > 1 and parts[1] else "UNKNOWN"
+                        ).upper()
 
                     lot_wafer_pairs.append((lot_id, wafer_id))
 
