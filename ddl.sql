@@ -11,6 +11,12 @@ CREATE TABLE IF NOT EXISTS zip_record (
 CREATE UNIQUE INDEX IF NOT EXISTS uq_zip_record
 ON zip_record (type, lot_id, wafer_id);
 
+CREATE INDEX IF NOT EXISTS idx_zip_record_created_at_desc
+ON zip_record (created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_zip_record_type_created_at_desc
+ON zip_record (type, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS zip_task_status (
     id BIGSERIAL PRIMARY KEY,
     type VARCHAR(50) NOT NULL,
@@ -23,3 +29,9 @@ CREATE TABLE IF NOT EXISTS zip_task_status (
     CONSTRAINT ck_zip_task_status_status CHECK (status IN ('PENDING', 'SUCCESS', 'FAILED')),
     CONSTRAINT uq_zip_task_status_zip_path UNIQUE (zip_path)
 );
+
+CREATE INDEX IF NOT EXISTS idx_zip_task_status_updated_at_desc
+ON zip_task_status (updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_zip_task_status_type
+ON zip_task_status (type, updated_at DESC);
