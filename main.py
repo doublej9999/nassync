@@ -5,7 +5,6 @@ import os
 import re
 import shutil
 import sys
-import tempfile
 import threading
 import time
 import zipfile
@@ -536,65 +535,59 @@ class Processor:
         rel = path.relative_to(self.cfg.WATCH_DIR)
 
         rec_type = rel.parts[-3]
-        unzip_dir = self.cfg.TARGET_DIR / rel.parent
-        backup_dir = path.parent / "BACKUP"
+        target_dir = self.cfg.TARGET_DIR / rel.parent
+        target_zip_path = target_dir / path.name
 
-        lot_wafer_pairs = self.extract(path, unzip_dir)
+        lot_wafer_pairs = self.scan_zip(path)
 
         self.pg.insert_records(rec_type, lot_wafer_pairs, path.name, str(path))
 
-        backup_dir.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(path), str(backup_dir / path.name))
+        target_dir.mkdir(parents=True, exist_ok=True)
+        if target_zip_path.exists():
+            target_zip_path.unlink()
+        shutil.move(str(path), str(target_zip_path))
 
-        logger.info(f"完成：{path}")
+        logger.info(f"完成：{path} -> {target_zip_path}")
         return True
 
-    def extract(self, zip_path, target_dir):
-        with tempfile.TemporaryDirectory() as tmp:
-            with zipfile.ZipFile(zip_path) as z:
-                z.extractall(tmp)
+    def scan_zip(self, zip_path):
+        lot_wafer_pairs = []
+        map_name_pattern = re.compile(r"^([A-Za-z0-9]{6})-([A-Za-z0-9]{2})$")
+        zip_prefix = Path(zip_path).stem.split("-", 1)[0].upper()
 
-            lot_wafer_pairs = []
-            map_name_pattern = re.compile(r"^([A-Za-z0-9]{6})-([A-Za-z0-9]{2})$")
-            zip_prefix = Path(zip_path).stem.split("-", 1)[0].upper()
+        with zipfile.ZipFile(zip_path) as z:
+            for info in z.infolist():
+                if info.is_dir():
+                    continue
+                f = Path(info.filename).name
+                if Path(f).suffix.lower() != ".map":
+                    continue
 
-            for root, _, files in os.walk(tmp):
-                for f in files:
-                    if Path(f).suffix.lower() != ".map":
-                        continue
-
-                    stem = Path(f).stem
-                    if self.cfg.CHECK_ZIP_MAP_SAME_PREFIX:
-                        map_prefix = stem.split("-", 1)[0].upper()
-                        if map_prefix != zip_prefix:
-                            raise ValueError(
-                                f"ZIP 与 MAP 文件名前缀不一致：zip={Path(zip_path).name}, map={f}"
-                            )
-
-                    match = map_name_pattern.match(stem)
-                    if self.cfg.CHECK_MAP_FILENAME_FORMAT and not match:
+                stem = Path(f).stem
+                if self.cfg.CHECK_ZIP_MAP_SAME_PREFIX:
+                    map_prefix = stem.split("-", 1)[0].upper()
+                    if map_prefix != zip_prefix:
                         raise ValueError(
-                            f"MAP 文件名格式错误：{f}，期望格式为 XXXXXX-XX"
+                            f"ZIP 与 MAP 文件名前缀不一致：zip={Path(zip_path).name}, map={f}"
                         )
 
-                    if match:
-                        lot_id = match.group(1).upper()
-                        wafer_id = match.group(2).upper()
-                    else:
-                        parts = stem.split("-", 1)
-                        lot_id = (parts[0] if parts and parts[0] else "UNKNOWN").upper()
-                        wafer_id = (
-                            parts[1] if len(parts) > 1 and parts[1] else "UNKNOWN"
-                        ).upper()
+                match = map_name_pattern.match(stem)
+                if self.cfg.CHECK_MAP_FILENAME_FORMAT and not match:
+                    raise ValueError(f"MAP 文件名格式错误：{f}，期望格式为 XXXXXX-XX")
 
-                    lot_wafer_pairs.append((lot_id, wafer_id))
+                if match:
+                    lot_id = match.group(1).upper()
+                    wafer_id = match.group(2).upper()
+                else:
+                    parts = stem.split("-", 1)
+                    lot_id = (parts[0] if parts and parts[0] else "UNKNOWN").upper()
+                    wafer_id = (
+                        parts[1] if len(parts) > 1 and parts[1] else "UNKNOWN"
+                    ).upper()
 
-                    src = Path(root) / f
-                    dst = target_dir / f
-                    target_dir.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(src, dst)
+                lot_wafer_pairs.append((lot_id, wafer_id))
 
-            return sorted(set(lot_wafer_pairs))
+        return sorted(set(lot_wafer_pairs))
 
 
 # =========================
