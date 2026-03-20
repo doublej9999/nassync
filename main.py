@@ -52,6 +52,7 @@ class Config:
 
     WEB_HOST: str = "0.0.0.0"
     WEB_PORT: int = 8080
+    SYNC_TYPES: tuple[str, ...] = tuple()
 
 
 def _app_base_dir() -> Path:
@@ -66,6 +67,27 @@ def _to_bool(val):
     if val is None:
         return False
     return str(val).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+_SYNC_TYPES_RAW = None
+
+
+def _normalize_sync_types(raw_types):
+    if raw_types is None:
+        return tuple()
+    if not isinstance(raw_types, list):
+        return tuple()
+    normalized = []
+    seen = set()
+    for item in raw_types:
+        if not isinstance(item, str):
+            continue
+        value = item.strip().upper()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        normalized.append(value)
+    return tuple(normalized)
 
 
 def load_config() -> Config:
@@ -87,6 +109,9 @@ def load_config() -> Config:
         print("[配置] 配置文件格式错误（需为 JSON 对象），使用默认配置")
         return default_cfg
 
+    global _SYNC_TYPES_RAW
+    _SYNC_TYPES_RAW = raw.get("SYNC_TYPES")
+
     merged = dict(default_cfg.__dict__)
     merged.update({k: v for k, v in raw.items() if k in merged})
 
@@ -105,6 +130,7 @@ def load_config() -> Config:
     merged["CHECK_MAP_FILENAME_FORMAT"] = _to_bool(merged["CHECK_MAP_FILENAME_FORMAT"])
     merged["INITIAL_SCAN"] = _to_bool(merged["INITIAL_SCAN"])
     merged["WEB_PORT"] = int(merged["WEB_PORT"])
+    merged["SYNC_TYPES"] = _normalize_sync_types(_SYNC_TYPES_RAW)
 
     print(f"[配置] 已加载配置文件: {cfg_path}")
     return Config(**merged)
@@ -163,6 +189,16 @@ def validate_config(cfg: Config):
         "WEB_HOST",
     ]:
         check_non_empty(key, getattr(cfg, key))
+
+    if _SYNC_TYPES_RAW is not None:
+        if not isinstance(_SYNC_TYPES_RAW, list):
+            report("SYNC_TYPES 必须是字符串数组（可为空）")
+        else:
+            for idx, raw_item in enumerate(_SYNC_TYPES_RAW):
+                if not isinstance(raw_item, str):
+                    report(f"SYNC_TYPES[{idx}] 必须是字符串")
+                elif not raw_item.strip():
+                    report(f"SYNC_TYPES[{idx}] 必须是非空字符串")
 
     if errors:
         print("[配置] 启动前校验失败:")
@@ -521,6 +557,7 @@ class Processor:
         self.pg = pg
         self.processing = set()
         self.lock = threading.Lock()
+        self.sync_types = set(cfg.SYNC_TYPES)
 
     def is_valid(self, path: Path):
         if path.suffix.lower() != ".zip":
@@ -570,6 +607,15 @@ class Processor:
 
         rel = path.relative_to(self.cfg.WATCH_DIR)
         rec_type = rel.parts[-3]
+        rec_type_upper = rec_type.upper()
+        if self.sync_types and rec_type_upper not in self.sync_types:
+            logger.info(
+                "跳过（类型未配置）：%s type=%s",
+                path,
+                rec_type_upper,
+            )
+            return
+        rec_type = rec_type_upper
 
         key = str(path)
         with self.lock:
