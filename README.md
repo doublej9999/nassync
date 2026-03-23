@@ -64,7 +64,7 @@ nassync/
 推荐 Python 3.10+。
 
 ```bash
-pip install psycopg2-binary watchdog
+pip install -r requirements.txt
 ```
 
 > 如果你使用源码中的 `psycopg2`（非 binary 包），请确保本机已安装 PostgreSQL 对应的编译依赖。
@@ -87,9 +87,11 @@ pip install psycopg2-binary watchdog
 
 - 目录配置：`WATCH_DIR`、`TARGET_DIR`
 - 数据库配置：`DB_HOST`、`DB_PORT`、`DB_NAME`、`DB_SCHEMA`、`DB_USER`、`DB_PASSWORD`
+  - 支持环境变量 `NASSYNC_DB_PASSWORD` 覆盖 `config.json` 中的 `DB_PASSWORD`
 - 运行参数：
   - `FILE_STABLE_CHECK_TIMES` / `FILE_STABLE_CHECK_INTERVAL_SEC`
-  - `PROCESS_RETRY_TIMES` / `PROCESS_RETRY_INTERVAL_SEC`
+  - `PROCESS_RETRY_TIMES` / `PROCESS_RETRY_INTERVAL_SEC` / `PROCESS_RETRY_BACKOFF_MAX_SEC`
+  - `TASK_QUEUE_MAX_SIZE` / `EVENT_DEDUP_WINDOW_SEC` / `DASHBOARD_CACHE_TTL_SEC`
   - `INITIAL_SCAN`（启动时是否扫描历史 ZIP）
 - Web 面板：`WEB_HOST`、`WEB_PORT`
 - 同步控制：`SYNC_TYPES`（填写 `["BP","CD"]` 等类型，留空或不配置时同步所有）
@@ -105,7 +107,7 @@ pip install psycopg2-binary watchdog
   "DB_NAME": "postgres",
   "DB_SCHEMA": "public",
   "DB_USER": "postgres",
-  "DB_PASSWORD": "123456",
+  "DB_PASSWORD": "CHANGE_ME",
   "DB_TABLE": "zip_record",
   "DB_TASK_TABLE": "zip_task_status",
   "LOG_DIR": ".\\logs",
@@ -113,12 +115,27 @@ pip install psycopg2-binary watchdog
     "BP",
     "CD"
   ],
+  "FILE_STABLE_CHECK_TIMES": 3,
+  "FILE_STABLE_CHECK_INTERVAL_SEC": 2.0,
+  "PROCESS_RETRY_TIMES": 3,
+  "PROCESS_RETRY_INTERVAL_SEC": 3.0,
+  "PROCESS_RETRY_BACKOFF_MAX_SEC": 30.0,
+  "TASK_QUEUE_MAX_SIZE": 2000,
+  "EVENT_DEDUP_WINDOW_SEC": 1.0,
+  "DASHBOARD_CACHE_TTL_SEC": 2.0,
   "INITIAL_SCAN": true,
   "WEB_HOST": "0.0.0.0",
   "WEB_PORT": 8080
 }
 
 `SYNC_TYPES` 中只会同步列表内的目录，所有值会自动变成大写，省略该字段或提供空数组则同步全部类型。
+```
+
+建议将数据库密码通过环境变量传入：
+
+```bash
+set NASSYNC_DB_PASSWORD=your_password
+python main.py
 ```
 
 ## 6. 启动方式
@@ -134,28 +151,40 @@ python main.py
 - 文件监听服务（watchdog）
 - Web 监控服务（默认 `http://0.0.0.0:8080/dashboard`）
 
-### 6.2 打包运行（Windows EXE）
+### 6.2 一键打包（Windows + Linux）
 
-```bash
-pyinstaller nassync.spec
+项目根目录已提供 `build_all.ps1`，可一次性产出：
+
+- `dist/windows/nassync.exe`
+- `dist/linux/nassync`
+
+执行命令：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build_all.ps1
 ```
 
-生成可执行文件后，发布目录至少包含：
+说明：
 
-- `dist/nassync.exe`
-- `dist/config.json`（可从 `config.example.json` 复制）
+- Windows 包：本机 Python 虚拟环境构建
+- Linux 包：通过 Docker 镜像 `python:3.11-bullseye` 构建
+- 脚本会自动复制 `config.example.json` 到对应产物目录的 `config.json`
 
-然后运行：
+可选参数：
 
-```bash
-dist/nassync.exe
+```powershell
+# 仅打 Windows
+powershell -ExecutionPolicy Bypass -File .\build_all.ps1 -SkipLinux
+
+# 仅打 Linux
+powershell -ExecutionPolicy Bypass -File .\build_all.ps1 -SkipWindows
 ```
 
-如果配置文件不在 exe 同目录，可用环境变量指定：
+如果配置文件不在可执行文件同目录，可用环境变量指定：
 
 ```bash
 set NASSYNC_CONFIG=D:\deploy\nassync\config.json
-dist\nassync.exe
+dist\windows\nassync.exe
 ```
 
 ## 7. Web 监控接口
@@ -192,9 +221,17 @@ dist\nassync.exe
    - 数据库两张表有对应记录
    - `/dashboard` 展示任务状态
 
-## 10. 后续改进建议
+## 10. 自动化测试
 
-- 增加配置项校验（启动前检查目录存在性、端口范围、数据库连通性）
-- 增加 `requirements.txt`
-- 增加单元测试（命名校验、路径校验、重试逻辑）
-- 增加健康检查接口（如 `/healthz`）
+已提供基础 `pytest` 用例，覆盖：
+
+- ZIP 中 MAP 提取与目标目录写入
+- 空 MAP ZIP 的失败判定
+- 路径合法性校验与重试退避计算
+
+运行方式：
+
+```bash
+pip install -r requirements.txt
+pytest -q
+```

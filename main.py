@@ -3,6 +3,7 @@ import logging
 import logging.handlers
 import os
 import queue
+import errno
 import re
 import shutil
 import sys
@@ -15,7 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from psycopg2 import pool
+from psycopg2 import DatabaseError, InterfaceError, OperationalError, pool
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
@@ -44,6 +45,11 @@ class Config:
 
     PROCESS_RETRY_TIMES: int = 3
     PROCESS_RETRY_INTERVAL_SEC: float = 3.0
+    PROCESS_RETRY_BACKOFF_MAX_SEC: float = 30.0
+
+    TASK_QUEUE_MAX_SIZE: int = 2000
+    EVENT_DEDUP_WINDOW_SEC: float = 1.0
+    DASHBOARD_CACHE_TTL_SEC: float = 2.0
 
     CHECK_ZIP_MAP_SAME_PREFIX: bool = True
     CHECK_MAP_FILENAME_FORMAT: bool = True
@@ -93,27 +99,34 @@ def _normalize_sync_types(raw_types):
 def load_config() -> Config:
     default_cfg = Config()
     cfg_path = Path(os.getenv("NASSYNC_CONFIG", _app_base_dir() / "config.json"))
+    raw = {}
+    config_loaded = False
 
     if not cfg_path.exists():
         print(f"[配置] 未找到配置文件，使用默认配置: {cfg_path}")
-        return default_cfg
-
-    try:
-        with cfg_path.open("r", encoding="utf-8") as f:
-            raw = json.load(f)
-    except Exception as e:
-        print(f"[配置] 读取配置失败，使用默认配置: {e}")
-        return default_cfg
-
-    if not isinstance(raw, dict):
-        print("[配置] 配置文件格式错误（需为 JSON 对象），使用默认配置")
-        return default_cfg
+    else:
+        try:
+            with cfg_path.open("r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                raw = loaded
+                config_loaded = True
+            else:
+                print("[配置] 配置文件格式错误（需为 JSON 对象），使用默认配置")
+        except Exception as e:
+            print(f"[配置] 读取配置失败，使用默认配置: {e}")
 
     global _SYNC_TYPES_RAW
-    _SYNC_TYPES_RAW = raw.get("SYNC_TYPES")
+    _SYNC_TYPES_RAW = raw.get("SYNC_TYPES") if raw else None
 
     merged = dict(default_cfg.__dict__)
-    merged.update({k: v for k, v in raw.items() if k in merged})
+    if raw:
+        merged.update({k: v for k, v in raw.items() if k in merged})
+
+    env_db_password = os.getenv("NASSYNC_DB_PASSWORD")
+    if env_db_password is not None and env_db_password != "":
+        merged["DB_PASSWORD"] = env_db_password
+        print("[配置] 已从环境变量 NASSYNC_DB_PASSWORD 覆盖数据库密码")
 
     # 类型转换，确保外部 JSON 配置能正确映射
     merged["WATCH_DIR"] = Path(merged["WATCH_DIR"])
@@ -126,13 +139,20 @@ def load_config() -> Config:
     )
     merged["PROCESS_RETRY_TIMES"] = int(merged["PROCESS_RETRY_TIMES"])
     merged["PROCESS_RETRY_INTERVAL_SEC"] = float(merged["PROCESS_RETRY_INTERVAL_SEC"])
+    merged["PROCESS_RETRY_BACKOFF_MAX_SEC"] = float(
+        merged["PROCESS_RETRY_BACKOFF_MAX_SEC"]
+    )
+    merged["TASK_QUEUE_MAX_SIZE"] = int(merged["TASK_QUEUE_MAX_SIZE"])
+    merged["EVENT_DEDUP_WINDOW_SEC"] = float(merged["EVENT_DEDUP_WINDOW_SEC"])
+    merged["DASHBOARD_CACHE_TTL_SEC"] = float(merged["DASHBOARD_CACHE_TTL_SEC"])
     merged["CHECK_ZIP_MAP_SAME_PREFIX"] = _to_bool(merged["CHECK_ZIP_MAP_SAME_PREFIX"])
     merged["CHECK_MAP_FILENAME_FORMAT"] = _to_bool(merged["CHECK_MAP_FILENAME_FORMAT"])
     merged["INITIAL_SCAN"] = _to_bool(merged["INITIAL_SCAN"])
     merged["WEB_PORT"] = int(merged["WEB_PORT"])
     merged["SYNC_TYPES"] = _normalize_sync_types(_SYNC_TYPES_RAW)
 
-    print(f"[配置] 已加载配置文件: {cfg_path}")
+    if config_loaded:
+        print(f"[配置] 已加载配置文件: {cfg_path}")
     return Config(**merged)
 
 
@@ -174,6 +194,21 @@ def validate_config(cfg: Config):
 
     if cfg.PROCESS_RETRY_INTERVAL_SEC <= 0:
         report("PROCESS_RETRY_INTERVAL_SEC 必须大于 0")
+
+    if cfg.PROCESS_RETRY_BACKOFF_MAX_SEC <= 0:
+        report("PROCESS_RETRY_BACKOFF_MAX_SEC 必须大于 0")
+
+    if cfg.PROCESS_RETRY_BACKOFF_MAX_SEC < cfg.PROCESS_RETRY_INTERVAL_SEC:
+        report("PROCESS_RETRY_BACKOFF_MAX_SEC 不能小于 PROCESS_RETRY_INTERVAL_SEC")
+
+    if cfg.TASK_QUEUE_MAX_SIZE < 1:
+        report("TASK_QUEUE_MAX_SIZE 必须大于 0")
+
+    if cfg.EVENT_DEDUP_WINDOW_SEC < 0:
+        report("EVENT_DEDUP_WINDOW_SEC 不能为负")
+
+    if cfg.DASHBOARD_CACHE_TTL_SEC < 0:
+        report("DASHBOARD_CACHE_TTL_SEC 不能为负")
 
     def check_non_empty(name: str, value: str):
         if not isinstance(value, str) or not value.strip():
@@ -254,6 +289,10 @@ def summarize_error_msg(error_msg, max_len=200):
     # 只取首行，过滤 traceback 等细节
     major = text.split("\n", 1)[0].strip()
     return major[:max_len]
+
+
+class RetryableProcessError(Exception):
+    """表示短暂性错误，可重试。"""
 
 
 # =========================
@@ -623,36 +662,100 @@ class Processor:
                 return
             self.processing.add(key)
 
+        max_attempts = max(1, int(self.cfg.PROCESS_RETRY_TIMES))
+        last_error = None
+
         try:
             self.pg.upsert_task_status(rec_type, path.name, str(path), "PENDING")
-            for i in range(self.cfg.PROCESS_RETRY_TIMES):
-                done = self._process(path)
-                if done:
+            for attempt in range(max_attempts):
+                try:
+                    self._process(path)
                     self.pg.upsert_task_status(rec_type, path.name, str(path), "SUCCESS")
+                    return
+                except Exception as ex:
+                    last_error = ex
+                    retryable = self._is_retryable_error(ex)
+                    has_next = attempt < max_attempts - 1
+
+                    if retryable and has_next:
+                        delay = self._retry_delay(attempt)
+                        logger.warning(
+                            "处理失败，准备重试：%s (%s/%s), %ss 后重试, err=%s",
+                            path,
+                            attempt + 1,
+                            max_attempts,
+                            f"{delay:.2f}",
+                            summarize_error_msg(ex),
+                        )
+                        time.sleep(delay)
+                        continue
+
+                    if retryable:
+                        logger.exception(
+                            "处理失败（达到最大重试次数）：%s, err=%s",
+                            path,
+                            summarize_error_msg(ex),
+                        )
+                    else:
+                        logger.warning(
+                            "处理失败（不可重试）：%s, err=%s",
+                            path,
+                            summarize_error_msg(ex),
+                        )
                     break
-                if i < self.cfg.PROCESS_RETRY_TIMES - 1:
-                    logger.info(
-                        f"文件未稳定，准备重试：{path} ({i + 1}/{self.cfg.PROCESS_RETRY_TIMES})"
-                    )
-                    time.sleep(self.cfg.PROCESS_RETRY_INTERVAL_SEC)
-            else:
-                logger.warning(f"处理放弃（重试后仍未稳定）：{path}")
-                self.pg.upsert_task_status(
-                    rec_type,
-                    path.name,
-                    str(path),
-                    "FAILED",
-                    "文件重试后仍未稳定",
-                )
+
+            failure_reason = (
+                f"{type(last_error).__name__}: {last_error}"
+                if last_error
+                else "处理失败（未知错误）"
+            )
+            self.pg.upsert_task_status(
+                rec_type,
+                path.name,
+                str(path),
+                "FAILED",
+                failure_reason,
+            )
         except Exception as ex:
             # 避免事件回调线程因未捕获异常中断，记录后继续监听
             logger.exception(f"处理失败：{path}, err={ex}")
-            self.pg.upsert_task_status(
-                rec_type, path.name, str(path), "FAILED", f"{type(ex).__name__}: {ex}"
-            )
+            try:
+                self.pg.upsert_task_status(
+                    rec_type, path.name, str(path), "FAILED", f"{type(ex).__name__}: {ex}"
+                )
+            except Exception:
+                logger.exception("写入 FAILED 状态再次失败：%s", path)
         finally:
             with self.lock:
-                self.processing.remove(key)
+                self.processing.discard(key)
+
+    def _retry_delay(self, attempt: int) -> float:
+        base = max(0.1, float(self.cfg.PROCESS_RETRY_INTERVAL_SEC))
+        max_delay = max(base, float(self.cfg.PROCESS_RETRY_BACKOFF_MAX_SEC))
+        return min(base * (2**attempt), max_delay)
+
+    def _is_retryable_error(self, ex: Exception) -> bool:
+        if isinstance(ex, RetryableProcessError):
+            return True
+        if isinstance(
+            ex,
+            (
+                PermissionError,
+                TimeoutError,
+                zipfile.BadZipFile,
+                OperationalError,
+                InterfaceError,
+                DatabaseError,
+            ),
+        ):
+            return True
+        if isinstance(ex, OSError) and ex.errno in {
+            errno.EACCES,
+            errno.EBUSY,
+            errno.ETXTBSY,
+        }:
+            return True
+        return False
 
     def _process(self, path: Path):
         # 文件已被其他并发事件处理并移走时，视为当前事件无需再处理
@@ -663,37 +766,32 @@ class Processor:
         logger.info(f"处理：{path}")
 
         if not self.wait_stable(path):
-            return False
+            raise RetryableProcessError("文件未稳定")
 
         rel = path.relative_to(self.cfg.WATCH_DIR)
 
-        rec_type = rel.parts[-3]
+        rec_type = rel.parts[-3].upper()
         target_dir = self.cfg.TARGET_DIR / rel.parent
-        target_zip_path = target_dir / path.name
         backup_dir = path.parent / "BACKUP"
         backup_zip_path = backup_dir / path.name
 
-        lot_wafer_pairs = self.scan_zip(path)
+        lot_wafer_pairs = self.scan_zip(path, target_dir)
 
         self.pg.insert_records(rec_type, lot_wafer_pairs, path.name, str(path))
 
         backup_dir.mkdir(parents=True, exist_ok=True)
         if backup_zip_path.exists():
             backup_zip_path.unlink()
-        shutil.copy2(str(path), str(backup_zip_path))
+        shutil.move(str(path), str(backup_zip_path))
 
-        target_dir.mkdir(parents=True, exist_ok=True)
-        if target_zip_path.exists():
-            target_zip_path.unlink()
-        shutil.move(str(path), str(target_zip_path))
-
-        logger.info(f"完成：{path} -> {target_zip_path}，并备份到 {backup_zip_path}")
+        logger.info(f"完成：{path} -> {backup_zip_path}，MAP 已解压到 {target_dir}")
         return True
 
-    def scan_zip(self, zip_path):
+    def scan_zip(self, zip_path, target_dir: Path):
         lot_wafer_pairs = []
         map_name_pattern = re.compile(r"^([A-Za-z0-9]{6})-([A-Za-z0-9]{2})$")
         zip_prefix = Path(zip_path).stem.split("-", 1)[0].upper()
+        map_entries = []
 
         with zipfile.ZipFile(zip_path) as z:
             for info in z.infolist():
@@ -726,6 +824,18 @@ class Processor:
                     ).upper()
 
                 lot_wafer_pairs.append((lot_id, wafer_id))
+                map_entries.append((info, f))
+
+            if not map_entries:
+                raise ValueError(f"ZIP 内未找到 MAP 文件：{Path(zip_path).name}")
+
+            target_dir.mkdir(parents=True, exist_ok=True)
+            for info, map_file_name in map_entries:
+                target_map_path = target_dir / map_file_name
+                temp_path = target_map_path.with_suffix(f"{target_map_path.suffix}.tmp")
+                with z.open(info, "r") as src, temp_path.open("wb") as dst:
+                    shutil.copyfileobj(src, dst)
+                temp_path.replace(target_map_path)
 
             return sorted(set(lot_wafer_pairs))
 
@@ -734,11 +844,19 @@ class Processor:
 # 任务队列
 # =========================
 class TaskWorkerPool:
-    def __init__(self, processor, worker_count=DEFAULT_WORKER_COUNT):
+    def __init__(
+        self,
+        processor,
+        worker_count=DEFAULT_WORKER_COUNT,
+        max_queue_size=None,
+    ):
         self.processor = processor
         self.worker_count = worker_count
-        self.queue = queue.Queue()
+        queue_size = max_queue_size or processor.cfg.TASK_QUEUE_MAX_SIZE
+        self.queue = queue.Queue(maxsize=max(1, int(queue_size)))
         self._stop_event = threading.Event()
+        self._queued_paths = set()
+        self._queue_lock = threading.Lock()
         self._workers = []
         for idx in range(worker_count):
             worker = threading.Thread(
@@ -754,27 +872,54 @@ class TaskWorkerPool:
             logger.info("任务队列已停止，忽略新文件：%s", path)
             return
         target = path if isinstance(path, Path) else Path(path)
-        self.queue.put(target)
+        key = str(target)
+
+        with self._queue_lock:
+            if key in self._queued_paths:
+                logger.debug("事件去重（队列中已存在）：%s", target)
+                return
+            self._queued_paths.add(key)
+
+        try:
+            self.queue.put_nowait(target)
+        except queue.Full:
+            with self._queue_lock:
+                self._queued_paths.discard(key)
+            logger.warning("任务队列已满，忽略文件：%s", target)
 
     def _run_worker(self):
         while True:
-            if self._stop_event.is_set() and self.queue.empty():
-                break
             try:
                 path = self.queue.get(timeout=1)
             except queue.Empty:
+                if self._stop_event.is_set():
+                    break
                 continue
+
+            if path is None:
+                self.queue.task_done()
+                break
+
             try:
                 self.processor.process(path)
             except Exception:
                 logger.exception("Worker 处理时遇到未捕获异常：%s", path)
             finally:
+                with self._queue_lock:
+                    self._queued_paths.discard(str(path))
                 self.queue.task_done()
 
     def shutdown(self, wait=True):
         self._stop_event.set()
         if wait:
             self.queue.join()
+        for _ in self._workers:
+            while True:
+                try:
+                    self.queue.put_nowait(None)
+                    break
+                except queue.Full:
+                    time.sleep(0.05)
         for worker in self._workers:
             worker.join(timeout=5)
 
@@ -783,8 +928,11 @@ class TaskWorkerPool:
 # 监听
 # =========================
 class Handler(FileSystemEventHandler):
-    def __init__(self, worker_pool):
+    def __init__(self, worker_pool, dedup_window_sec=1.0):
         self.worker_pool = worker_pool
+        self._dedup_window_sec = max(0.0, float(dedup_window_sec))
+        self._event_lock = threading.Lock()
+        self._last_event_ts = {}
         self._active = threading.Event()
         self._active.set()
 
@@ -798,6 +946,23 @@ class Handler(FileSystemEventHandler):
         if not self.is_active():
             logger.info("监听器已停用，忽略事件：%s", path)
             return
+        key = str(path)
+        now = time.monotonic()
+
+        with self._event_lock:
+            if self._dedup_window_sec > 0:
+                last_ts = self._last_event_ts.get(key)
+                if last_ts is not None and (now - last_ts) < self._dedup_window_sec:
+                    logger.debug("事件去抖跳过：%s", path)
+                    return
+            self._last_event_ts[key] = now
+
+            if len(self._last_event_ts) > 5000:
+                expire_before = now - max(1.0, self._dedup_window_sec * 5)
+                self._last_event_ts = {
+                    p: ts for p, ts in self._last_event_ts.items() if ts >= expire_before
+                }
+
         self.worker_pool.enqueue(path)
 
     def on_created(self, e):
@@ -1029,11 +1194,16 @@ DASHBOARD_HTML = """<!doctype html>
       document.getElementById('refresh_time').textContent = '更新时间：' + esc(data.generated_at || '-');
     }
 
+    let loading = false;
     async function tick() {
+      if (loading) return;
+      loading = true;
       try {
         await loadData();
       } catch (e) {
         console.error('加载失败', e);
+      } finally {
+        loading = false;
       }
     }
 
@@ -1103,7 +1273,13 @@ DASHBOARD_HTML = """<!doctype html>
 """
 
 
-def create_dashboard_handler(pg: PgClient, lifecycle: ServiceLifecycle):
+def create_dashboard_handler(pg: PgClient, lifecycle: ServiceLifecycle, cfg: Config):
+    cache_lock = threading.Lock()
+    cache_ttl_sec = max(0.0, float(cfg.DASHBOARD_CACHE_TTL_SEC))
+    cache_key = None
+    cache_payload = None
+    cache_expire_at = 0.0
+
     class DashboardHandler(BaseHTTPRequestHandler):
         def _send_json(self, payload, status=HTTPStatus.OK):
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -1143,6 +1319,7 @@ def create_dashboard_handler(pg: PgClient, lifecycle: ServiceLifecycle):
                 return
 
             if parsed.path == "/api/dashboard":
+                nonlocal cache_key, cache_payload, cache_expire_at
                 qs = parse_qs(parsed.query or "")
                 try:
                     task_page = max(1, int((qs.get("task_page") or ["1"])[0]))
@@ -1163,6 +1340,25 @@ def create_dashboard_handler(pg: PgClient, lifecycle: ServiceLifecycle):
                     )
                     return
 
+                current_key = (
+                    task_page,
+                    task_page_size,
+                    task_q,
+                    record_page,
+                    record_page_size,
+                    record_q,
+                )
+                now = time.monotonic()
+
+                with cache_lock:
+                    if (
+                        cache_key == current_key
+                        and cache_payload is not None
+                        and now < cache_expire_at
+                    ):
+                        self._send_json(cache_payload)
+                        return
+
                 data = pg.get_dashboard_metrics()
                 data["recent_tasks"] = pg.get_recent_tasks(
                     page=task_page, page_size=task_page_size, keyword=task_q
@@ -1170,6 +1366,13 @@ def create_dashboard_handler(pg: PgClient, lifecycle: ServiceLifecycle):
                 data["recent_records"] = pg.get_recent_records(
                     page=record_page, page_size=record_page_size, keyword=record_q
                 )
+
+                if cache_ttl_sec > 0:
+                    with cache_lock:
+                        cache_key = current_key
+                        cache_payload = data
+                        cache_expire_at = now + cache_ttl_sec
+
                 self._send_json(data)
                 return
 
@@ -1187,9 +1390,9 @@ def create_dashboard_handler(pg: PgClient, lifecycle: ServiceLifecycle):
 def main():
     pg = PgClient(CONFIG)
     p = Processor(CONFIG, pg)
-    worker_pool = TaskWorkerPool(p)
+    worker_pool = TaskWorkerPool(p, max_queue_size=CONFIG.TASK_QUEUE_MAX_SIZE)
 
-    handler = Handler(worker_pool)
+    handler = Handler(worker_pool, dedup_window_sec=CONFIG.EVENT_DEDUP_WINDOW_SEC)
     observer = Observer()
     lifecycle = ServiceLifecycle(handler, observer)
 
@@ -1203,7 +1406,8 @@ def main():
     logger.info("启动监听...")
 
     web_server = ThreadingHTTPServer(
-        (CONFIG.WEB_HOST, CONFIG.WEB_PORT), create_dashboard_handler(pg, lifecycle)
+        (CONFIG.WEB_HOST, CONFIG.WEB_PORT),
+        create_dashboard_handler(pg, lifecycle, CONFIG),
     )
     lifecycle.mark_web_started()
     web_thread = threading.Thread(target=web_server.serve_forever, daemon=True)
