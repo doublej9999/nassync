@@ -2,10 +2,10 @@
 import logging
 import logging.handlers
 import os
+import queue
 import re
 import shutil
 import sys
-import tempfile
 import threading
 import time
 import zipfile
@@ -45,10 +45,14 @@ class Config:
     PROCESS_RETRY_TIMES: int = 3
     PROCESS_RETRY_INTERVAL_SEC: float = 3.0
 
+    CHECK_ZIP_MAP_SAME_PREFIX: bool = True
+    CHECK_MAP_FILENAME_FORMAT: bool = True
+
     INITIAL_SCAN: bool = True
 
     WEB_HOST: str = "0.0.0.0"
     WEB_PORT: int = 8080
+    SYNC_TYPES: tuple[str, ...] = tuple()
 
 
 def _app_base_dir() -> Path:
@@ -63,6 +67,27 @@ def _to_bool(val):
     if val is None:
         return False
     return str(val).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+_SYNC_TYPES_RAW = None
+
+
+def _normalize_sync_types(raw_types):
+    if raw_types is None:
+        return tuple()
+    if not isinstance(raw_types, list):
+        return tuple()
+    normalized = []
+    seen = set()
+    for item in raw_types:
+        if not isinstance(item, str):
+            continue
+        value = item.strip().upper()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        normalized.append(value)
+    return tuple(normalized)
 
 
 def load_config() -> Config:
@@ -84,6 +109,9 @@ def load_config() -> Config:
         print("[配置] 配置文件格式错误（需为 JSON 对象），使用默认配置")
         return default_cfg
 
+    global _SYNC_TYPES_RAW
+    _SYNC_TYPES_RAW = raw.get("SYNC_TYPES")
+
     merged = dict(default_cfg.__dict__)
     merged.update({k: v for k, v in raw.items() if k in merged})
 
@@ -98,15 +126,91 @@ def load_config() -> Config:
     )
     merged["PROCESS_RETRY_TIMES"] = int(merged["PROCESS_RETRY_TIMES"])
     merged["PROCESS_RETRY_INTERVAL_SEC"] = float(merged["PROCESS_RETRY_INTERVAL_SEC"])
+    merged["CHECK_ZIP_MAP_SAME_PREFIX"] = _to_bool(merged["CHECK_ZIP_MAP_SAME_PREFIX"])
+    merged["CHECK_MAP_FILENAME_FORMAT"] = _to_bool(merged["CHECK_MAP_FILENAME_FORMAT"])
     merged["INITIAL_SCAN"] = _to_bool(merged["INITIAL_SCAN"])
     merged["WEB_PORT"] = int(merged["WEB_PORT"])
+    merged["SYNC_TYPES"] = _normalize_sync_types(_SYNC_TYPES_RAW)
 
     print(f"[配置] 已加载配置文件: {cfg_path}")
     return Config(**merged)
 
 
+def validate_config(cfg: Config):
+    errors = []
+
+    def report(message: str):
+        errors.append(message)
+
+    def check_dir(name: str, path: Path, must_exist: bool = True):
+        if not isinstance(path, Path):
+            report(f"{name} 不是有效路径: {path}")
+            return
+        if must_exist:
+            if not path.exists():
+                report(f"{name} 路径不存在: {path}")
+                return
+            if not path.is_dir():
+                report(f"{name} 不是目录: {path}")
+        else:
+            if path.exists() and not path.is_dir():
+                report(f"{name} 不是目录: {path}")
+
+    check_dir("WATCH_DIR", cfg.WATCH_DIR)
+    check_dir("TARGET_DIR", cfg.TARGET_DIR)
+    check_dir("LOG_DIR", cfg.LOG_DIR, must_exist=False)
+
+    if not (1 <= cfg.WEB_PORT <= 65535):
+        report(f"WEB_PORT 必须在 1-65535 之间: {cfg.WEB_PORT}")
+
+    if cfg.FILE_STABLE_CHECK_TIMES < 1:
+        report("FILE_STABLE_CHECK_TIMES 必须大于 0")
+
+    if cfg.FILE_STABLE_CHECK_INTERVAL_SEC <= 0:
+        report("FILE_STABLE_CHECK_INTERVAL_SEC 必须大于 0")
+
+    if cfg.PROCESS_RETRY_TIMES < 0:
+        report("PROCESS_RETRY_TIMES 不能为负")
+
+    if cfg.PROCESS_RETRY_INTERVAL_SEC <= 0:
+        report("PROCESS_RETRY_INTERVAL_SEC 必须大于 0")
+
+    def check_non_empty(name: str, value: str):
+        if not isinstance(value, str) or not value.strip():
+            report(f"{name} 不能为空")
+
+    for key in [
+        "DB_HOST",
+        "DB_NAME",
+        "DB_USER",
+        "DB_TABLE",
+        "DB_TASK_TABLE",
+        "DB_SCHEMA",
+        "WEB_HOST",
+    ]:
+        check_non_empty(key, getattr(cfg, key))
+
+    if _SYNC_TYPES_RAW is not None:
+        if not isinstance(_SYNC_TYPES_RAW, list):
+            report("SYNC_TYPES 必须是字符串数组（可为空）")
+        else:
+            for idx, raw_item in enumerate(_SYNC_TYPES_RAW):
+                if not isinstance(raw_item, str):
+                    report(f"SYNC_TYPES[{idx}] 必须是字符串")
+                elif not raw_item.strip():
+                    report(f"SYNC_TYPES[{idx}] 必须是非空字符串")
+
+    if errors:
+        print("[配置] 启动前校验失败:")
+        for err in errors:
+            print(f"  - {err}")
+        raise SystemExit(1)
+
+
 CONFIG = load_config()
 
+DEFAULT_WORKER_COUNT = max(2, os.cpu_count() or 2)
+validate_config(CONFIG)
 
 # =========================
 # 日志
@@ -177,7 +281,8 @@ class PgClient:
                 INSERT INTO {self.cfg.DB_TABLE}
                 (type, lot_id, wafer_id, zip_name, zip_path)
                 VALUES (%s,%s,%s,%s,%s)
-                ON CONFLICT (type, lot_id, wafer_id) DO NOTHING
+                ON CONFLICT (type, lot_id, wafer_id) DO UPDATE SET
+                  created_at = NOW()
                 """
                 data = [
                     (rec_type, lot_id, wafer_id, zip_name, zip_path)
@@ -419,6 +524,29 @@ class PgClient:
         finally:
             self.pool.putconn(conn)
 
+    def check_health(self):
+        conn = None
+        try:
+            conn = self.pool.getconn()
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+                cur.fetchone()
+            return True, None
+        except Exception as ex:
+            return False, summarize_error_msg(ex)
+        finally:
+            if conn:
+                try:
+                    self.pool.putconn(conn)
+                except Exception:
+                    pass
+
+    def close(self):
+        try:
+            self.pool.closeall()
+        except Exception as ex:
+            logger.exception("关闭数据库连接池时出错：%s", ex)
+
 
 # =========================
 # 核心处理
@@ -429,6 +557,7 @@ class Processor:
         self.pg = pg
         self.processing = set()
         self.lock = threading.Lock()
+        self.sync_types = set(cfg.SYNC_TYPES)
 
     def is_valid(self, path: Path):
         if path.suffix.lower() != ".zip":
@@ -478,6 +607,15 @@ class Processor:
 
         rel = path.relative_to(self.cfg.WATCH_DIR)
         rec_type = rel.parts[-3]
+        rec_type_upper = rec_type.upper()
+        if self.sync_types and rec_type_upper not in self.sync_types:
+            logger.info(
+                "跳过（类型未配置）：%s type=%s",
+                path,
+                rec_type_upper,
+            )
+            return
+        rec_type = rec_type_upper
 
         key = str(path)
         with self.lock:
@@ -530,78 +668,178 @@ class Processor:
         rel = path.relative_to(self.cfg.WATCH_DIR)
 
         rec_type = rel.parts[-3]
-        unzip_dir = self.cfg.TARGET_DIR / rel.parent
+        target_dir = self.cfg.TARGET_DIR / rel.parent
+        target_zip_path = target_dir / path.name
         backup_dir = path.parent / "BACKUP"
+        backup_zip_path = backup_dir / path.name
 
-        lot_wafer_pairs = self.extract(path, unzip_dir)
+        lot_wafer_pairs = self.scan_zip(path)
 
         self.pg.insert_records(rec_type, lot_wafer_pairs, path.name, str(path))
 
         backup_dir.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(path), str(backup_dir / path.name))
+        if backup_zip_path.exists():
+            backup_zip_path.unlink()
+        shutil.copy2(str(path), str(backup_zip_path))
 
-        logger.info(f"完成：{path}")
+        target_dir.mkdir(parents=True, exist_ok=True)
+        if target_zip_path.exists():
+            target_zip_path.unlink()
+        shutil.move(str(path), str(target_zip_path))
+
+        logger.info(f"完成：{path} -> {target_zip_path}，并备份到 {backup_zip_path}")
         return True
 
-    def extract(self, zip_path, target_dir):
-        with tempfile.TemporaryDirectory() as tmp:
-            with zipfile.ZipFile(zip_path) as z:
-                z.extractall(tmp)
+    def scan_zip(self, zip_path):
+        lot_wafer_pairs = []
+        map_name_pattern = re.compile(r"^([A-Za-z0-9]{6})-([A-Za-z0-9]{2})$")
+        zip_prefix = Path(zip_path).stem.split("-", 1)[0].upper()
 
-            lot_wafer_pairs = []
-            map_name_pattern = re.compile(r"^([A-Za-z0-9]{6})-([A-Za-z0-9]{2})$")
-            zip_prefix = Path(zip_path).stem.split("-", 1)[0].upper()
+        with zipfile.ZipFile(zip_path) as z:
+            for info in z.infolist():
+                if info.is_dir():
+                    continue
+                f = Path(info.filename).name
+                if Path(f).suffix.lower() != ".map":
+                    continue
 
-            for root, _, files in os.walk(tmp):
-                for f in files:
-                    if Path(f).suffix.lower() != ".map":
-                        continue
-
-                    stem = Path(f).stem
+                stem = Path(f).stem
+                if self.cfg.CHECK_ZIP_MAP_SAME_PREFIX:
                     map_prefix = stem.split("-", 1)[0].upper()
                     if map_prefix != zip_prefix:
                         raise ValueError(
                             f"ZIP 与 MAP 文件名前缀不一致：zip={Path(zip_path).name}, map={f}"
                         )
 
-                    match = map_name_pattern.match(stem)
-                    if not match:
-                        raise ValueError(
-                            f"MAP 文件名格式错误：{f}，期望格式为 XXXXXX-XX"
-                        )
+                match = map_name_pattern.match(stem)
+                if self.cfg.CHECK_MAP_FILENAME_FORMAT and not match:
+                    raise ValueError(f"MAP 文件名格式错误：{f}，期望格式为 XXXXXX-XX")
 
+                if match:
                     lot_id = match.group(1).upper()
                     wafer_id = match.group(2).upper()
+                else:
+                    parts = stem.split("-", 1)
+                    lot_id = (parts[0] if parts and parts[0] else "UNKNOWN").upper()
+                    wafer_id = (
+                        parts[1] if len(parts) > 1 and parts[1] else "UNKNOWN"
+                    ).upper()
 
-                    lot_wafer_pairs.append((lot_id, wafer_id))
-
-                    src = Path(root) / f
-                    dst = target_dir / f
-                    target_dir.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(src, dst)
+                lot_wafer_pairs.append((lot_id, wafer_id))
 
             return sorted(set(lot_wafer_pairs))
+
+
+# =========================
+# 任务队列
+# =========================
+class TaskWorkerPool:
+    def __init__(self, processor, worker_count=DEFAULT_WORKER_COUNT):
+        self.processor = processor
+        self.worker_count = worker_count
+        self.queue = queue.Queue()
+        self._stop_event = threading.Event()
+        self._workers = []
+        for idx in range(worker_count):
+            worker = threading.Thread(
+                target=self._run_worker,
+                name=f"processor-worker-{idx}",
+                daemon=True,
+            )
+            worker.start()
+            self._workers.append(worker)
+
+    def enqueue(self, path):
+        if self._stop_event.is_set():
+            logger.info("任务队列已停止，忽略新文件：%s", path)
+            return
+        target = path if isinstance(path, Path) else Path(path)
+        self.queue.put(target)
+
+    def _run_worker(self):
+        while True:
+            if self._stop_event.is_set() and self.queue.empty():
+                break
+            try:
+                path = self.queue.get(timeout=1)
+            except queue.Empty:
+                continue
+            try:
+                self.processor.process(path)
+            except Exception:
+                logger.exception("Worker 处理时遇到未捕获异常：%s", path)
+            finally:
+                self.queue.task_done()
+
+    def shutdown(self, wait=True):
+        self._stop_event.set()
+        if wait:
+            self.queue.join()
+        for worker in self._workers:
+            worker.join(timeout=5)
 
 
 # =========================
 # 监听
 # =========================
 class Handler(FileSystemEventHandler):
-    def __init__(self, p):
-        self.p = p
+    def __init__(self, worker_pool):
+        self.worker_pool = worker_pool
+        self._active = threading.Event()
+        self._active.set()
+
+    def is_active(self):
+        return self._active.is_set()
+
+    def disable(self):
+        self._active.clear()
+
+    def _handle_event(self, path: Path):
+        if not self.is_active():
+            logger.info("监听器已停用，忽略事件：%s", path)
+            return
+        self.worker_pool.enqueue(path)
 
     def on_created(self, e):
         if not e.is_directory:
-            self.p.process(Path(e.src_path))
+            self._handle_event(Path(e.src_path))
 
     def on_modified(self, e):
         if not e.is_directory:
-            self.p.process(Path(e.src_path))
+            self._handle_event(Path(e.src_path))
 
     def on_moved(self, e):
         if not e.is_directory:
             # 兼容“先写临时文件再重命名为 .zip”的上传方式
-            self.p.process(Path(e.dest_path))
+            self._handle_event(Path(e.dest_path))
+
+
+class ServiceLifecycle:
+    def __init__(self, handler: Handler, observer: Observer):
+        self.handler = handler
+        self.observer = observer
+        self._web_running = threading.Event()
+        self._shutdown_requested = threading.Event()
+
+    def mark_web_started(self):
+        self._web_running.set()
+
+    def mark_web_stopped(self):
+        self._web_running.clear()
+
+    def request_shutdown(self):
+        if not self._shutdown_requested.is_set():
+            self._shutdown_requested.set()
+            self.handler.disable()
+
+    def watcher_healthy(self):
+        return self.handler.is_active() and self.observer.is_alive()
+
+    def web_healthy(self):
+        return self._web_running.is_set()
+
+    def is_shutting_down(self):
+        return self._shutdown_requested.is_set()
 
 
 # =========================
@@ -865,7 +1103,7 @@ DASHBOARD_HTML = """<!doctype html>
 """
 
 
-def create_dashboard_handler(pg: PgClient):
+def create_dashboard_handler(pg: PgClient, lifecycle: ServiceLifecycle):
     class DashboardHandler(BaseHTTPRequestHandler):
         def _send_json(self, payload, status=HTTPStatus.OK):
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -887,6 +1125,21 @@ def create_dashboard_handler(pg: PgClient):
             parsed = urlparse(self.path)
             if parsed.path in ("/", "/dashboard"):
                 self._send_html(DASHBOARD_HTML)
+                return
+
+            if parsed.path == "/healthz":
+                watcher_state = "running" if lifecycle.watcher_healthy() else "stopped"
+                web_state = "running" if lifecycle.web_healthy() else "stopped"
+                db_ok, db_msg = pg.check_health()
+                payload = {
+                    "status": "ok" if db_ok else "degraded",
+                    "watcher": watcher_state,
+                    "web": web_state,
+                    "db": "ok" if db_ok else "error",
+                    "db_error": db_msg,
+                    "shutting_down": lifecycle.is_shutting_down(),
+                }
+                self._send_json(payload)
                 return
 
             if parsed.path == "/api/dashboard":
@@ -934,33 +1187,73 @@ def create_dashboard_handler(pg: PgClient):
 def main():
     pg = PgClient(CONFIG)
     p = Processor(CONFIG, pg)
+    worker_pool = TaskWorkerPool(p)
+
+    handler = Handler(worker_pool)
+    observer = Observer()
+    lifecycle = ServiceLifecycle(handler, observer)
 
     if CONFIG.INITIAL_SCAN:
         for f in CONFIG.WATCH_DIR.rglob("*"):
             if f.is_file() and f.suffix.lower() == ".zip":
-                p.process(f)
+                handler._handle_event(f)
 
-    obs = Observer()
-    obs.schedule(Handler(p), str(CONFIG.WATCH_DIR), recursive=True)
-    obs.start()
+    observer.schedule(handler, str(CONFIG.WATCH_DIR), recursive=True)
+    observer.start()
     logger.info("启动监听...")
 
     web_server = ThreadingHTTPServer(
-        (CONFIG.WEB_HOST, CONFIG.WEB_PORT), create_dashboard_handler(pg)
+        (CONFIG.WEB_HOST, CONFIG.WEB_PORT), create_dashboard_handler(pg, lifecycle)
     )
+    lifecycle.mark_web_started()
     web_thread = threading.Thread(target=web_server.serve_forever, daemon=True)
     web_thread.start()
     logger.info(f"Web 监控已启动：http://{CONFIG.WEB_HOST}:{CONFIG.WEB_PORT}/dashboard")
 
+    def shutdown(reason: str):
+        if lifecycle.is_shutting_down():
+            return
+        lifecycle.request_shutdown()
+        logger.info("开始优雅关闭服务：%s", reason)
+        try:
+            if observer.is_alive():
+                observer.stop()
+        except Exception as ex:
+            logger.exception("停止监听失败：%s", ex)
+        try:
+            if lifecycle.web_healthy():
+                web_server.shutdown()
+            web_server.server_close()
+        except Exception as ex:
+            logger.exception("关闭 Web 服务失败：%s", ex)
+        finally:
+            lifecycle.mark_web_stopped()
+
+        if web_thread.is_alive():
+            web_thread.join(timeout=5)
+        observer.join(timeout=5)
+
+        worker_pool.shutdown()
+
+        try:
+            pg.close()
+        except Exception as ex:
+            logger.exception("关闭数据库连接失败：%s", ex)
+
+        logger.info("所有服务已停止")
+
+    stop_reason = "正常退出"
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        web_server.shutdown()
-        web_server.server_close()
-        obs.stop()
-
-    obs.join()
+        stop_reason = "收到键盘中断"
+        logger.info("收到退出信号")
+    except Exception as ex:
+        stop_reason = f"运行异常：{type(ex).__name__}"
+        logger.exception("主循环异常：%s", ex)
+    finally:
+        shutdown(stop_reason)
 
 
 if __name__ == "__main__":

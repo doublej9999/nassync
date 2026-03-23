@@ -92,6 +92,7 @@ pip install psycopg2-binary watchdog
   - `PROCESS_RETRY_TIMES` / `PROCESS_RETRY_INTERVAL_SEC`
   - `INITIAL_SCAN`（启动时是否扫描历史 ZIP）
 - Web 面板：`WEB_HOST`、`WEB_PORT`
+- 同步控制：`SYNC_TYPES`（填写 `["BP","CD"]` 等类型，留空或不配置时同步所有）
 
 示例：
 
@@ -108,10 +109,16 @@ pip install psycopg2-binary watchdog
   "DB_TABLE": "zip_record",
   "DB_TASK_TABLE": "zip_task_status",
   "LOG_DIR": ".\\logs",
+  "SYNC_TYPES": [
+    "BP",
+    "CD"
+  ],
   "INITIAL_SCAN": true,
   "WEB_HOST": "0.0.0.0",
   "WEB_PORT": 8080
 }
+
+`SYNC_TYPES` 中只会同步列表内的目录，所有值会自动变成大写，省略该字段或提供空数组则同步全部类型。
 ```
 
 ## 6. 启动方式
