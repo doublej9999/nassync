@@ -5,7 +5,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('nassync/templates/dashboard.html', 'nassync/templates')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

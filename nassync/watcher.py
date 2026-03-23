@@ -1,0 +1,88 @@
+﻿import logging
+import threading
+import time
+from pathlib import Path
+
+from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
+
+logger = logging.getLogger("watcher")
+
+
+class Handler(FileSystemEventHandler):
+    def __init__(self, worker_pool, dedup_window_sec=1.0):
+        self.worker_pool = worker_pool
+        self._dedup_window_sec = max(0.0, float(dedup_window_sec))
+        self._event_lock = threading.Lock()
+        self._last_event_ts = {}
+        self._active = threading.Event()
+        self._active.set()
+
+    def is_active(self):
+        return self._active.is_set()
+
+    def disable(self):
+        self._active.clear()
+
+    def _handle_event(self, path: Path):
+        if not self.is_active():
+            logger.info("监听器已停用，忽略事件：%s", path)
+            return
+        key = str(path)
+        ts = time.monotonic()
+
+        with self._event_lock:
+            if self._dedup_window_sec > 0:
+                last_ts = self._last_event_ts.get(key)
+                if last_ts is not None and (ts - last_ts) < self._dedup_window_sec:
+                    logger.debug("事件去抖跳过：%s", path)
+                    return
+            self._last_event_ts[key] = ts
+
+            if len(self._last_event_ts) > 5000:
+                expire_before = ts - max(1.0, self._dedup_window_sec * 5)
+                self._last_event_ts = {
+                    p: t for p, t in self._last_event_ts.items() if t >= expire_before
+                }
+
+        self.worker_pool.enqueue(path)
+
+    def on_created(self, e):
+        if not e.is_directory:
+            self._handle_event(Path(e.src_path))
+
+    def on_modified(self, e):
+        if not e.is_directory:
+            self._handle_event(Path(e.src_path))
+
+    def on_moved(self, e):
+        if not e.is_directory:
+            self._handle_event(Path(e.dest_path))
+
+
+class ServiceLifecycle:
+    def __init__(self, handler: Handler, observer: Observer):
+        self.handler = handler
+        self.observer = observer
+        self._web_running = threading.Event()
+        self._shutdown_requested = threading.Event()
+
+    def mark_web_started(self):
+        self._web_running.set()
+
+    def mark_web_stopped(self):
+        self._web_running.clear()
+
+    def request_shutdown(self):
+        if not self._shutdown_requested.is_set():
+            self._shutdown_requested.set()
+            self.handler.disable()
+
+    def watcher_healthy(self):
+        return self.handler.is_active() and self.observer.is_alive()
+
+    def web_healthy(self):
+        return self._web_running.is_set()
+
+    def is_shutting_down(self):
+        return self._shutdown_requested.is_set()

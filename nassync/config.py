@@ -1,0 +1,222 @@
+import json
+import os
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+
+@dataclass(frozen=True)
+class Config:
+    WATCH_DIR: Path = Path(r"C:\Users\Administrator\Desktop\nassync\A")
+    TARGET_DIR: Path = Path(r"C:\Users\Administrator\Desktop\nassync\B")
+
+    DB_HOST: str = "localhost"
+    DB_PORT: int = 5432
+    DB_NAME: str = "postgres"
+    DB_SCHEMA: str = "public"
+    DB_USER: str = "postgres"
+    DB_PASSWORD: str = "123456"
+    DB_TABLE: str = "zip_record"
+    DB_TASK_TABLE: str = "zip_task_status"
+
+    LOG_DIR: Path = Path(r".\logs")
+
+    FILE_STABLE_CHECK_TIMES: int = 3
+    FILE_STABLE_CHECK_INTERVAL_SEC: float = 2.0
+
+    PROCESS_RETRY_TIMES: int = 3
+    PROCESS_RETRY_INTERVAL_SEC: float = 3.0
+    PROCESS_RETRY_BACKOFF_MAX_SEC: float = 30.0
+
+    TASK_QUEUE_MAX_SIZE: int = 2000
+    EVENT_DEDUP_WINDOW_SEC: float = 1.0
+    DASHBOARD_CACHE_TTL_SEC: float = 2.0
+
+    CHECK_ZIP_MAP_SAME_PREFIX: bool = True
+    CHECK_MAP_FILENAME_FORMAT: bool = True
+
+    INITIAL_SCAN: bool = True
+
+    WEB_HOST: str = "0.0.0.0"
+    WEB_PORT: int = 8080
+    SYNC_TYPES: tuple[str, ...] = tuple()
+
+
+def _app_base_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parents[1]
+
+
+def _to_bool(val):
+    if isinstance(val, bool):
+        return val
+    if val is None:
+        return False
+    return str(val).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+_SYNC_TYPES_RAW = None
+
+
+def _normalize_sync_types(raw_types):
+    if raw_types is None:
+        return tuple()
+    if not isinstance(raw_types, list):
+        return tuple()
+    normalized = []
+    seen = set()
+    for item in raw_types:
+        if not isinstance(item, str):
+            continue
+        value = item.strip().upper()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        normalized.append(value)
+    return tuple(normalized)
+
+
+def load_config() -> Config:
+    default_cfg = Config()
+    cfg_path = Path(os.getenv("NASSYNC_CONFIG", _app_base_dir() / "config.json"))
+    raw = {}
+    config_loaded = False
+
+    if not cfg_path.exists():
+        print(f"[配置] 未找到配置文件，使用默认配置: {cfg_path}")
+    else:
+        try:
+            with cfg_path.open("r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                raw = loaded
+                config_loaded = True
+            else:
+                print("[配置] 配置文件格式错误（需为 JSON 对象），使用默认配置")
+        except Exception as e:
+            print(f"[配置] 读取配置失败，使用默认配置: {e}")
+
+    global _SYNC_TYPES_RAW
+    _SYNC_TYPES_RAW = raw.get("SYNC_TYPES") if raw else None
+
+    merged = dict(default_cfg.__dict__)
+    if raw:
+        merged.update({k: v for k, v in raw.items() if k in merged})
+
+    env_db_password = os.getenv("NASSYNC_DB_PASSWORD")
+    if env_db_password is not None and env_db_password != "":
+        merged["DB_PASSWORD"] = env_db_password
+        print("[配置] 已从环境变量 NASSYNC_DB_PASSWORD 覆盖数据库密码")
+
+    merged["WATCH_DIR"] = Path(merged["WATCH_DIR"])
+    merged["TARGET_DIR"] = Path(merged["TARGET_DIR"])
+    merged["LOG_DIR"] = Path(merged["LOG_DIR"])
+    merged["DB_PORT"] = int(merged["DB_PORT"])
+    merged["FILE_STABLE_CHECK_TIMES"] = int(merged["FILE_STABLE_CHECK_TIMES"])
+    merged["FILE_STABLE_CHECK_INTERVAL_SEC"] = float(
+        merged["FILE_STABLE_CHECK_INTERVAL_SEC"]
+    )
+    merged["PROCESS_RETRY_TIMES"] = int(merged["PROCESS_RETRY_TIMES"])
+    merged["PROCESS_RETRY_INTERVAL_SEC"] = float(merged["PROCESS_RETRY_INTERVAL_SEC"])
+    merged["PROCESS_RETRY_BACKOFF_MAX_SEC"] = float(
+        merged["PROCESS_RETRY_BACKOFF_MAX_SEC"]
+    )
+    merged["TASK_QUEUE_MAX_SIZE"] = int(merged["TASK_QUEUE_MAX_SIZE"])
+    merged["EVENT_DEDUP_WINDOW_SEC"] = float(merged["EVENT_DEDUP_WINDOW_SEC"])
+    merged["DASHBOARD_CACHE_TTL_SEC"] = float(merged["DASHBOARD_CACHE_TTL_SEC"])
+    merged["CHECK_ZIP_MAP_SAME_PREFIX"] = _to_bool(merged["CHECK_ZIP_MAP_SAME_PREFIX"])
+    merged["CHECK_MAP_FILENAME_FORMAT"] = _to_bool(merged["CHECK_MAP_FILENAME_FORMAT"])
+    merged["INITIAL_SCAN"] = _to_bool(merged["INITIAL_SCAN"])
+    merged["WEB_PORT"] = int(merged["WEB_PORT"])
+    merged["SYNC_TYPES"] = _normalize_sync_types(_SYNC_TYPES_RAW)
+
+    if config_loaded:
+        print(f"[配置] 已加载配置文件: {cfg_path}")
+    return Config(**merged)
+
+
+def validate_config(cfg: Config):
+    errors = []
+
+    def report(message: str):
+        errors.append(message)
+
+    def check_dir(name: str, path: Path, must_exist: bool = True):
+        if not isinstance(path, Path):
+            report(f"{name} 不是有效路径: {path}")
+            return
+        if must_exist:
+            if not path.exists():
+                report(f"{name} 路径不存在: {path}")
+                return
+            if not path.is_dir():
+                report(f"{name} 不是目录: {path}")
+        else:
+            if path.exists() and not path.is_dir():
+                report(f"{name} 不是目录: {path}")
+
+    check_dir("WATCH_DIR", cfg.WATCH_DIR)
+    check_dir("TARGET_DIR", cfg.TARGET_DIR)
+    check_dir("LOG_DIR", cfg.LOG_DIR, must_exist=False)
+
+    if not (1 <= cfg.WEB_PORT <= 65535):
+        report(f"WEB_PORT 必须在 1-65535 之间: {cfg.WEB_PORT}")
+
+    if cfg.FILE_STABLE_CHECK_TIMES < 1:
+        report("FILE_STABLE_CHECK_TIMES 必须大于 0")
+
+    if cfg.FILE_STABLE_CHECK_INTERVAL_SEC <= 0:
+        report("FILE_STABLE_CHECK_INTERVAL_SEC 必须大于 0")
+
+    if cfg.PROCESS_RETRY_TIMES < 0:
+        report("PROCESS_RETRY_TIMES 不能为负")
+
+    if cfg.PROCESS_RETRY_INTERVAL_SEC <= 0:
+        report("PROCESS_RETRY_INTERVAL_SEC 必须大于 0")
+
+    if cfg.PROCESS_RETRY_BACKOFF_MAX_SEC <= 0:
+        report("PROCESS_RETRY_BACKOFF_MAX_SEC 必须大于 0")
+
+    if cfg.PROCESS_RETRY_BACKOFF_MAX_SEC < cfg.PROCESS_RETRY_INTERVAL_SEC:
+        report("PROCESS_RETRY_BACKOFF_MAX_SEC 不能小于 PROCESS_RETRY_INTERVAL_SEC")
+
+    if cfg.TASK_QUEUE_MAX_SIZE < 1:
+        report("TASK_QUEUE_MAX_SIZE 必须大于 0")
+
+    if cfg.EVENT_DEDUP_WINDOW_SEC < 0:
+        report("EVENT_DEDUP_WINDOW_SEC 不能为负")
+
+    if cfg.DASHBOARD_CACHE_TTL_SEC < 0:
+        report("DASHBOARD_CACHE_TTL_SEC 不能为负")
+
+    def check_non_empty(name: str, value: str):
+        if not isinstance(value, str) or not value.strip():
+            report(f"{name} 不能为空")
+
+    for key in [
+        "DB_HOST",
+        "DB_NAME",
+        "DB_USER",
+        "DB_TABLE",
+        "DB_TASK_TABLE",
+        "DB_SCHEMA",
+        "WEB_HOST",
+    ]:
+        check_non_empty(key, getattr(cfg, key))
+
+    if _SYNC_TYPES_RAW is not None:
+        if not isinstance(_SYNC_TYPES_RAW, list):
+            report("SYNC_TYPES 必须是字符串数组（可为空）")
+        else:
+            for idx, raw_item in enumerate(_SYNC_TYPES_RAW):
+                if not isinstance(raw_item, str):
+                    report(f"SYNC_TYPES[{idx}] 必须是字符串")
+                elif not raw_item.strip():
+                    report(f"SYNC_TYPES[{idx}] 必须是非空字符串")
+
+    if errors:
+        print("[配置] 启动前校验失败:")
+        for err in errors:
+            print(f"  - {err}")
+        raise SystemExit(1)

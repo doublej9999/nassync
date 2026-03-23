@@ -5,3 +5,7 @@
 /dist/
 /logs/
 /nassync.spec
+/.venv-build-win/
+__pycache__/
+*.pyc
+/tests/.runtime/
