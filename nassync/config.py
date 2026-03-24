@@ -3,6 +3,7 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 
 @dataclass(frozen=True)
@@ -77,6 +78,60 @@ def _normalize_sync_types(raw_types):
     return tuple(normalized)
 
 
+def _is_smb_url(raw: str) -> bool:
+    lowered = raw.lower()
+    return lowered.startswith("smb://") or lowered.startswith("cifs://")
+
+
+def _smb_url_to_unc(raw: str) -> str:
+    parsed = urlparse(raw)
+    host = parsed.hostname
+    parts = [unquote(item) for item in parsed.path.split("/") if item]
+
+    if not host or len(parts) < 1:
+        raise ValueError(f"NAS 地址格式错误，需为 smb://server/share[/dir]：{raw}")
+    if parsed.port is not None:
+        raise ValueError(f"NAS 地址不支持端口号，请移除 :{parsed.port}：{raw}")
+
+    return "\\\\" + "\\".join([host, *parts])
+
+
+def normalize_dir_path(raw_value, cfg_path: Path | None = None) -> Path:
+    if isinstance(raw_value, Path):
+        raw = str(raw_value)
+    elif isinstance(raw_value, str):
+        raw = raw_value.strip()
+    else:
+        raise TypeError(f"目录路径类型错误：{type(raw_value).__name__}")
+
+    if not raw:
+        raise ValueError("目录路径不能为空")
+
+    raw = os.path.expandvars(os.path.expanduser(raw))
+    if _is_smb_url(raw):
+        raw = _smb_url_to_unc(raw)
+
+    path = Path(raw)
+    if not path.is_absolute() and cfg_path is not None:
+        path = cfg_path.parent / path
+
+    return Path(os.path.normpath(str(path)))
+
+
+def is_nas_path(path: Path) -> bool:
+    if not isinstance(path, Path):
+        return False
+
+    raw = str(path)
+    if raw.startswith("\\\\") or raw.startswith("//"):
+        return True
+
+    drive = getattr(path, "drive", "")
+    return isinstance(drive, str) and (
+        drive.startswith("\\\\") or drive.startswith("//")
+    )
+
+
 def load_config() -> Config:
     default_cfg = Config()
     cfg_path = Path(os.getenv("NASSYNC_CONFIG", _app_base_dir() / "config.json"))
@@ -109,9 +164,16 @@ def load_config() -> Config:
         merged["DB_PASSWORD"] = env_db_password
         print("[配置] 已从环境变量 NASSYNC_DB_PASSWORD 覆盖数据库密码")
 
-    merged["WATCH_DIR"] = Path(merged["WATCH_DIR"])
-    merged["TARGET_DIR"] = Path(merged["TARGET_DIR"])
-    merged["LOG_DIR"] = Path(merged["LOG_DIR"])
+    try:
+        merged["WATCH_DIR"] = normalize_dir_path(merged["WATCH_DIR"], cfg_path=cfg_path)
+        merged["TARGET_DIR"] = normalize_dir_path(
+            merged["TARGET_DIR"], cfg_path=cfg_path
+        )
+        merged["LOG_DIR"] = normalize_dir_path(merged["LOG_DIR"], cfg_path=cfg_path)
+    except Exception as ex:
+        print(f"[配置] 目录配置解析失败: {ex}")
+        raise SystemExit(1)
+
     merged["DB_PORT"] = int(merged["DB_PORT"])
     merged["FILE_STABLE_CHECK_TIMES"] = int(merged["FILE_STABLE_CHECK_TIMES"])
     merged["FILE_STABLE_CHECK_INTERVAL_SEC"] = float(
@@ -152,7 +214,7 @@ def validate_config(cfg: Config):
         if path.exists() and not path.is_dir():
             report(f"{name} 不是目录: {path}")
 
-    # 目录暂时不可用时允许启动，运行期由重试机制恢复
+    # 目录暂时不可用时允许启动，运行期由重试机制恢复。
     check_dir("WATCH_DIR", cfg.WATCH_DIR, must_exist=False)
     check_dir("TARGET_DIR", cfg.TARGET_DIR, must_exist=False)
     check_dir("LOG_DIR", cfg.LOG_DIR, must_exist=False)

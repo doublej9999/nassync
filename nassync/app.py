@@ -4,8 +4,9 @@ import time
 from http.server import ThreadingHTTPServer
 
 from watchdog.observers import Observer
+from watchdog.observers.polling import PollingObserver
 
-from .config import load_config, validate_config
+from .config import is_nas_path, load_config, validate_config
 from .dashboard import create_dashboard_handler
 from .db import PgClient
 from .errors import summarize_error_msg
@@ -15,6 +16,13 @@ from .watcher import Handler, ServiceLifecycle
 from .workers import TaskWorkerPool
 
 logger = logging.getLogger("watcher")
+
+
+def _create_observer(watch_dir):
+    if is_nas_path(watch_dir):
+        logger.info("检测到 NAS 目录，监听器切换为轮询模式：%s", watch_dir)
+        return PollingObserver(timeout=1.0)
+    return Observer()
 
 
 def main():
@@ -70,7 +78,7 @@ def main():
                 except Exception:
                     pass
 
-            new_observer = Observer()
+            new_observer = _create_observer(cfg.WATCH_DIR)
             new_observer.schedule(handler, str(cfg.WATCH_DIR), recursive=True)
             new_observer.start()
             lifecycle.set_observer(new_observer)

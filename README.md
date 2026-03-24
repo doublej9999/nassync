@@ -86,6 +86,10 @@ pip install -r requirements.txt
 核心配置项：
 
 - 目录配置：`WATCH_DIR`、`TARGET_DIR`
+  - 支持本地路径（如 `D:\\A`）
+  - 支持 NAS UNC 路径（如 `\\\\NAS01\\fab\\A`）
+  - 支持 SMB URL（如 `smb://nas01/fab/A`，程序会自动转为 UNC）
+  - 当 `WATCH_DIR` 为 NAS 路径时，监听器会自动切换为轮询模式（`PollingObserver`）
 - 数据库配置：`DB_HOST`、`DB_PORT`、`DB_NAME`、`DB_SCHEMA`、`DB_USER`、`DB_PASSWORD`
   - 支持环境变量 `NASSYNC_DB_PASSWORD` 覆盖 `config.json` 中的 `DB_PASSWORD`
 - 运行参数：
@@ -96,7 +100,7 @@ pip install -r requirements.txt
 - Web 面板：`WEB_HOST`、`WEB_PORT`
 - 同步控制：`SYNC_TYPES`（填写 `["BP","CD"]` 等类型，留空或不配置时同步所有）
 
-示例：
+示例（本地目录）：
 
 ```json
 {
@@ -129,6 +133,15 @@ pip install -r requirements.txt
 }
 
 `SYNC_TYPES` 中只会同步列表内的目录，所有值会自动变成大写，省略该字段或提供空数组则同步全部类型。
+```
+
+示例（NAS 目录）：
+
+```json
+{
+  "WATCH_DIR": "\\\\NAS01\\fab\\A",
+  "TARGET_DIR": "smb://nas01/fab/B"
+}
 ```
 
 建议将数据库密码通过环境变量传入：
