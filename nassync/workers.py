@@ -68,13 +68,35 @@ class TaskWorkerPool:
                 break
 
             try:
-                self.processor.process(path)
+                retry_delay = self.processor.process(path)
+                if retry_delay is not None:
+                    self._enqueue_later(path, retry_delay)
             except Exception:
                 logger.exception("Worker 处理时遇到未捕获异常：%s", path)
             finally:
                 with self._queue_lock:
                     self._queued_paths.discard(str(path))
                 self.queue.task_done()
+
+    def _enqueue_later(self, path: Path, delay_sec):
+        try:
+            delay = float(delay_sec)
+        except (TypeError, ValueError):
+            delay = 0.0
+        delay = max(0.1, delay)
+
+        def _delayed_enqueue():
+            if self._stop_event.wait(delay):
+                return
+            logger.info("任务重入队列：%s（延迟 %.2fs）", path, delay)
+            self.enqueue(path)
+
+        t = threading.Thread(
+            target=_delayed_enqueue,
+            name=f"retry-enqueue-{int(time.time() * 1000)}",
+            daemon=True,
+        )
+        t.start()
 
     def shutdown(self, wait=True):
         self._stop_event.set()

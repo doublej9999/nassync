@@ -61,9 +61,12 @@ class Handler(FileSystemEventHandler):
 
 
 class ServiceLifecycle:
-    def __init__(self, handler: Handler, observer: Observer):
+    def __init__(self, handler: Handler, observer: Observer = None):
         self.handler = handler
-        self.observer = observer
+        self._observer_lock = threading.Lock()
+        self.observer = None
+        if observer is not None:
+            self.set_observer(observer)
         self._web_running = threading.Event()
         self._shutdown_requested = threading.Event()
 
@@ -78,8 +81,17 @@ class ServiceLifecycle:
             self._shutdown_requested.set()
             self.handler.disable()
 
+    def set_observer(self, observer: Observer):
+        with self._observer_lock:
+            self.observer = observer
+
+    def get_observer(self):
+        with self._observer_lock:
+            return self.observer
+
     def watcher_healthy(self):
-        return self.handler.is_active() and self.observer.is_alive()
+        observer = self.get_observer()
+        return self.handler.is_active() and observer is not None and observer.is_alive()
 
     def web_healthy(self):
         return self._web_running.is_set()

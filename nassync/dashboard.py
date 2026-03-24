@@ -102,13 +102,29 @@ def create_dashboard_handler(pg: PgClient, lifecycle: ServiceLifecycle, cfg: Con
                         self._send_json(cache_payload)
                         return
 
-                data = pg.get_dashboard_metrics()
-                data["recent_tasks"] = pg.get_recent_tasks(
-                    page=task_page, page_size=task_page_size, keyword=task_q
-                )
-                data["recent_records"] = pg.get_recent_records(
-                    page=record_page, page_size=record_page_size, keyword=record_q
-                )
+                try:
+                    data = pg.get_dashboard_metrics()
+                    data["recent_tasks"] = pg.get_recent_tasks(
+                        page=task_page, page_size=task_page_size, keyword=task_q
+                    )
+                    data["recent_records"] = pg.get_recent_records(
+                        page=record_page, page_size=record_page_size, keyword=record_q
+                    )
+                except Exception as ex:
+                    logger.warning("查询看板数据失败：%s", ex)
+                    with cache_lock:
+                        stale = cache_payload
+                    if stale is not None:
+                        degraded_payload = dict(stale)
+                        degraded_payload["degraded"] = True
+                        degraded_payload["error"] = "数据库暂不可用，返回缓存数据"
+                        self._send_json(degraded_payload, status=HTTPStatus.SERVICE_UNAVAILABLE)
+                        return
+                    self._send_json(
+                        {"error": "数据库暂不可用，请稍后重试"},
+                        status=HTTPStatus.SERVICE_UNAVAILABLE,
+                    )
+                    return
 
                 if cache_ttl_sec > 0:
                     with cache_lock:

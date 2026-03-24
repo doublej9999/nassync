@@ -94,8 +94,8 @@ def load_config() -> Config:
                 config_loaded = True
             else:
                 print("[配置] 配置文件格式错误（需为 JSON 对象），使用默认配置")
-        except Exception as e:
-            print(f"[配置] 读取配置失败，使用默认配置: {e}")
+        except Exception as ex:
+            print(f"[配置] 读取配置失败，使用默认配置: {ex}")
 
     global _SYNC_TYPES_RAW
     _SYNC_TYPES_RAW = raw.get("SYNC_TYPES") if raw else None
@@ -142,22 +142,19 @@ def validate_config(cfg: Config):
     def report(message: str):
         errors.append(message)
 
-    def check_dir(name: str, path: Path, must_exist: bool = True):
+    def check_dir(name: str, path: Path, must_exist: bool = False):
         if not isinstance(path, Path):
             report(f"{name} 不是有效路径: {path}")
             return
-        if must_exist:
-            if not path.exists():
-                report(f"{name} 路径不存在: {path}")
-                return
-            if not path.is_dir():
-                report(f"{name} 不是目录: {path}")
-        else:
-            if path.exists() and not path.is_dir():
-                report(f"{name} 不是目录: {path}")
+        if must_exist and not path.exists():
+            report(f"{name} 路径不存在: {path}")
+            return
+        if path.exists() and not path.is_dir():
+            report(f"{name} 不是目录: {path}")
 
-    check_dir("WATCH_DIR", cfg.WATCH_DIR)
-    check_dir("TARGET_DIR", cfg.TARGET_DIR)
+    # 目录暂时不可用时允许启动，运行期由重试机制恢复
+    check_dir("WATCH_DIR", cfg.WATCH_DIR, must_exist=False)
+    check_dir("TARGET_DIR", cfg.TARGET_DIR, must_exist=False)
     check_dir("LOG_DIR", cfg.LOG_DIR, must_exist=False)
 
     if not (1 <= cfg.WEB_PORT <= 65535):
@@ -170,7 +167,7 @@ def validate_config(cfg: Config):
         report("FILE_STABLE_CHECK_INTERVAL_SEC 必须大于 0")
 
     if cfg.PROCESS_RETRY_TIMES < 0:
-        report("PROCESS_RETRY_TIMES 不能为负")
+        report("PROCESS_RETRY_TIMES 不能为负数")
 
     if cfg.PROCESS_RETRY_INTERVAL_SEC <= 0:
         report("PROCESS_RETRY_INTERVAL_SEC 必须大于 0")
@@ -185,10 +182,10 @@ def validate_config(cfg: Config):
         report("TASK_QUEUE_MAX_SIZE 必须大于 0")
 
     if cfg.EVENT_DEDUP_WINDOW_SEC < 0:
-        report("EVENT_DEDUP_WINDOW_SEC 不能为负")
+        report("EVENT_DEDUP_WINDOW_SEC 不能为负数")
 
     if cfg.DASHBOARD_CACHE_TTL_SEC < 0:
-        report("DASHBOARD_CACHE_TTL_SEC 不能为负")
+        report("DASHBOARD_CACHE_TTL_SEC 不能为负数")
 
     def check_non_empty(name: str, value: str):
         if not isinstance(value, str) or not value.strip():
@@ -216,7 +213,7 @@ def validate_config(cfg: Config):
                     report(f"SYNC_TYPES[{idx}] 必须是非空字符串")
 
     if errors:
-        print("[配置] 启动前校验失败:")
+        print("[配置] 启动前校验失败：")
         for err in errors:
             print(f"  - {err}")
         raise SystemExit(1)

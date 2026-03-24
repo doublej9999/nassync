@@ -67,7 +67,7 @@ class Processor:
     def process(self, path: Path):
         if not self.is_valid(path):
             logger.info("跳过（不符合规则）：%s", path)
-            return
+            return None
 
         rel = path.relative_to(self.cfg.WATCH_DIR)
         rec_type = rel.parts[-3]
@@ -78,27 +78,29 @@ class Processor:
                 path,
                 rec_type_upper,
             )
-            return
+            return None
         rec_type = rec_type_upper
 
         key = str(path)
         with self.lock:
             if key in self.processing:
-                return
+                return None
             self.processing.add(key)
 
         max_attempts = max(1, int(self.cfg.PROCESS_RETRY_TIMES))
+        max_attempt_idx = max_attempts - 1
         last_error = None
 
         try:
             if self.pg is None:
                 raise RuntimeError("未配置数据库客户端，无法处理文件")
-            self.pg.upsert_task_status(rec_type, path.name, str(path), "PENDING")
+
             for attempt in range(max_attempts):
                 try:
+                    self.pg.upsert_task_status(rec_type, path.name, str(path), "PENDING")
                     self._process(path)
                     self.pg.upsert_task_status(rec_type, path.name, str(path), "SUCCESS")
-                    return
+                    return None
                 except Exception as ex:
                     last_error = ex
                     retryable = self._is_retryable_error(ex)
@@ -118,47 +120,55 @@ class Processor:
                         continue
 
                     if retryable:
-                        logger.exception(
-                            "处理失败（达到最大重试次数）：%s, err=%s",
+                        deferred_delay = self._retry_delay(max_attempt_idx)
+                        logger.warning(
+                            "处理失败（可恢复），将延迟重试：%s, %ss 后重入队列, err=%s",
                             path,
+                            f"{deferred_delay:.2f}",
                             summarize_error_msg(ex),
                         )
+                        return deferred_delay
                     else:
                         logger.warning(
                             "处理失败（不可重试）：%s, err=%s",
                             path,
                             summarize_error_msg(ex),
                         )
-                    break
+                        break
 
             failure_reason = (
                 f"{type(last_error).__name__}: {last_error}"
                 if last_error
                 else "处理失败（未知错误）"
             )
-            self.pg.upsert_task_status(
-                rec_type,
-                path.name,
-                str(path),
-                "FAILED",
-                failure_reason,
-            )
+            self._mark_failed(rec_type, path, failure_reason)
+            return None
         except Exception as ex:
             logger.exception("处理失败：%s, err=%s", path, ex)
-            if self.pg is not None:
-                try:
-                    self.pg.upsert_task_status(
-                        rec_type,
-                        path.name,
-                        str(path),
-                        "FAILED",
-                        f"{type(ex).__name__}: {ex}",
-                    )
-                except Exception:
-                    logger.exception("写入 FAILED 状态再次失败：%s", path)
+            if self._is_retryable_error(ex):
+                deferred_delay = self._retry_delay(max_attempt_idx)
+                logger.warning(
+                    "处理失败（外层可恢复），将延迟重试：%s, %ss 后重入队列, err=%s",
+                    path,
+                    f"{deferred_delay:.2f}",
+                    summarize_error_msg(ex),
+                )
+                return deferred_delay
+
+            self._mark_failed(rec_type, path, f"{type(ex).__name__}: {ex}")
+            return None
         finally:
             with self.lock:
                 self.processing.discard(key)
+
+    def _mark_failed(self, rec_type: str, path: Path, reason: str):
+        if self.pg is None:
+            logger.warning("数据库客户端不可用，FAILED 状态未写入：%s, err=%s", path, reason)
+            return
+        try:
+            self.pg.upsert_task_status(rec_type, path.name, str(path), "FAILED", reason)
+        except Exception:
+            logger.exception("写入 FAILED 状态失败：%s", path)
 
     def _retry_delay(self, attempt: int) -> float:
         base = max(0.1, float(self.cfg.PROCESS_RETRY_INTERVAL_SEC))
