@@ -508,8 +508,8 @@ class PgClient:
         if self.cfg.SYNC_TYPES:
             default_sync = self._normalize_sync_type(self.cfg.SYNC_TYPES[0]) or "BP"
 
-        default_watch = Path(r"C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP")
-        default_target = Path(r"C:\Users\Administrator\Desktop\nassync\B\BP\WAFER_MAP")
+        default_watch = Path(self.cfg.WATCH_DIR)
+        default_target = Path(self.cfg.TARGET_DIR)
         self.upsert_map_path_config(
             sync_types=default_sync,
             watch_dir=default_watch,

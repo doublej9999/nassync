@@ -93,7 +93,16 @@ def main():
         observer = lifecycle.get_observer()
         reload_requested = lifecycle.consume_reload_request()
         watch_dirs = load_watch_dirs()
-        watch_key = tuple(sorted(str(x).lower() for x in watch_dirs))
+
+        usable_watch_dirs = []
+        unavailable_watch_dirs = []
+        for watch_dir in watch_dirs:
+            if watch_dir.exists() and watch_dir.is_dir():
+                usable_watch_dirs.append(watch_dir)
+            else:
+                unavailable_watch_dirs.append(watch_dir)
+
+        watch_key = tuple(sorted(str(x).lower() for x in usable_watch_dirs))
 
         if (
             observer is not None
@@ -109,15 +118,8 @@ def main():
             return
         last_watch_attempt_at = now
 
-        usable_watch_dirs = []
-        for watch_dir in watch_dirs:
-            if watch_dir.exists() and watch_dir.is_dir():
-                usable_watch_dirs.append(watch_dir)
-            else:
-                logger.warning(
-                    "监听目录不可用：%s（将继续重试）",
-                    watch_dir,
-                )
+        for watch_dir in unavailable_watch_dirs:
+            logger.warning("监听目录不可用：%s（将继续重试）", watch_dir)
 
         if not usable_watch_dirs:
             return

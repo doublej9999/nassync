@@ -142,7 +142,7 @@ def load_config() -> Config:
         print(f"[配置] 未找到配置文件，使用默认配置: {cfg_path}")
     else:
         try:
-            with cfg_path.open("r", encoding="utf-8") as f:
+            with cfg_path.open("r", encoding="utf-8-sig") as f:
                 loaded = json.load(f)
             if isinstance(loaded, dict):
                 raw = loaded

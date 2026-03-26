@@ -1,6 +1,4 @@
 ﻿{
-  "WATCH_DIR": "C:\\Users\\Administrator\\Desktop\\nassync\\A\\BP\\WAFER_MAP",
-  "TARGET_DIR": "C:\\Users\\Administrator\\Desktop\\nassync\\B\\BP\\WAFER_MAP",
   "DB_HOST": "localhost",
   "DB_PORT": 5432,
   "DB_NAME": "postgres",
@@ -10,10 +8,6 @@
   "DB_TABLE": "zip_record",
   "DB_TASK_TABLE": "zip_task_status",
   "LOG_DIR": ".\\logs",
-  "SYNC_TYPES": [
-    "BP",
-    "CD"
-  ],
   "FILE_STABLE_CHECK_TIMES": 3,
   "FILE_STABLE_CHECK_INTERVAL_SEC": 2.0,
   "PROCESS_RETRY_TIMES": 3,
