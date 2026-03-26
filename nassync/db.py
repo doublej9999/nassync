@@ -233,11 +233,18 @@ class PgClient:
                             sync_types VARCHAR(50) NOT NULL,
                             watch_dir VARCHAR(1000) NOT NULL,
                             target_dir VARCHAR(1000) NOT NULL,
+                            is_feedback BOOLEAN NOT NULL DEFAULT FALSE,
                             enabled BOOLEAN NOT NULL DEFAULT TRUE,
                             created_at TIMESTAMP NOT NULL DEFAULT NOW(),
                             updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
                             CONSTRAINT uq_map_path_config_watch UNIQUE (watch_dir)
                         )
+                        """
+                    )
+                    cur.execute(
+                        f"""
+                        ALTER TABLE {self.MAP_PATH_TABLE}
+                        ADD COLUMN IF NOT EXISTS is_feedback BOOLEAN NOT NULL DEFAULT FALSE
                         """
                     )
                     cur.execute(
@@ -297,7 +304,7 @@ class PgClient:
             with conn.cursor() as cur:
                 cur.execute(
                     f"""
-                    SELECT id, sync_types, watch_dir, target_dir, enabled, created_at, updated_at
+                    SELECT id, sync_types, watch_dir, target_dir, is_feedback, enabled, created_at, updated_at
                     FROM {self.MAP_PATH_TABLE}
                     ORDER BY sync_types, watch_dir
                     """
@@ -312,9 +319,10 @@ class PgClient:
                         "sync_types": row[1],
                         "watch_dir": row[2],
                         "target_dir": row[3],
-                        "enabled": bool(row[4]),
-                        "created_at": row[5].strftime("%Y-%m-%d %H:%M:%S") if row[5] else None,
-                        "updated_at": row[6].strftime("%Y-%m-%d %H:%M:%S") if row[6] else None,
+                        "is_feedback": bool(row[4]),
+                        "enabled": bool(row[5]),
+                        "created_at": row[6].strftime("%Y-%m-%d %H:%M:%S") if row[6] else None,
+                        "updated_at": row[7].strftime("%Y-%m-%d %H:%M:%S") if row[7] else None,
                     }
                 )
             return data
@@ -327,7 +335,9 @@ class PgClient:
     def get_map_path_configs(self, only_enabled=False):
         return self._get_map_path_configs_cached(only_enabled=only_enabled)
 
-    def create_map_path_config(self, sync_types, watch_dir, target_dir, enabled=True):
+    def create_map_path_config(
+        self, sync_types, watch_dir, target_dir, enabled=True, is_feedback=False
+    ):
         normalized_sync_types = self._normalize_sync_type(sync_types)
         if not normalized_sync_types:
             raise ValueError("SYNC_TYPES 不能为空")
@@ -344,13 +354,14 @@ class PgClient:
                 cur.execute(
                     f"""
                     INSERT INTO {self.MAP_PATH_TABLE}
-                    (sync_types, watch_dir, target_dir, enabled, updated_at)
-                    VALUES (%s, %s, %s, %s, NOW())
+                    (sync_types, watch_dir, target_dir, is_feedback, enabled, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, NOW())
                     """,
                     (
                         normalized_sync_types,
                         normalized_watch,
                         normalized_target,
+                        bool(is_feedback),
                         bool(enabled),
                     ),
                 )
@@ -368,7 +379,13 @@ class PgClient:
             self._release_conn(active_pool, conn)
 
     def update_map_path_config(
-        self, config_id, sync_types, watch_dir, target_dir, enabled=True
+        self,
+        config_id,
+        sync_types,
+        watch_dir,
+        target_dir,
+        enabled=True,
+        is_feedback=False,
     ):
         normalized_sync_types = self._normalize_sync_type(sync_types)
         if not normalized_sync_types:
@@ -389,6 +406,7 @@ class PgClient:
                     SET sync_types = %s,
                         watch_dir = %s,
                         target_dir = %s,
+                        is_feedback = %s,
                         enabled = %s,
                         updated_at = NOW()
                     WHERE id = %s
@@ -397,6 +415,7 @@ class PgClient:
                         normalized_sync_types,
                         normalized_watch,
                         normalized_target,
+                        bool(is_feedback),
                         bool(enabled),
                         int(config_id),
                     ),
@@ -416,7 +435,9 @@ class PgClient:
         finally:
             self._release_conn(active_pool, conn)
 
-    def upsert_map_path_config(self, sync_types, watch_dir, target_dir, enabled=True):
+    def upsert_map_path_config(
+        self, sync_types, watch_dir, target_dir, enabled=True, is_feedback=False
+    ):
         # 兼容旧调用：按 watch_dir 幂等写入
         normalized_watch = str(Path(watch_dir))
         exists = None
@@ -426,9 +447,16 @@ class PgClient:
                 break
         if exists:
             return self.update_map_path_config(
-                exists["id"], sync_types, watch_dir, target_dir, enabled
+                exists["id"],
+                sync_types,
+                watch_dir,
+                target_dir,
+                enabled,
+                is_feedback,
             )
-        return self.create_map_path_config(sync_types, watch_dir, target_dir, enabled)
+        return self.create_map_path_config(
+            sync_types, watch_dir, target_dir, enabled, is_feedback
+        )
 
     def delete_map_path_config(self, config_id):
         active_pool = None
@@ -494,6 +522,7 @@ class PgClient:
                     "watch_dir_path": Path(item["watch_dir"]),
                     "target_dir_path": Path(item["target_dir"]),
                     "sync_type": self._normalize_sync_type(item["sync_types"]),
+                    "is_feedback": bool(item.get("is_feedback")),
                 }
                 matched_len = length
 

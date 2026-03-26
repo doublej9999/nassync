@@ -73,7 +73,7 @@
         <button id="cfg_add_btn" class="btn-primary" type="button">新增配置</button>
       </div>
       <table>
-        <thead><tr><th>ID</th><th>SYNC_TYPES</th><th>WATCH_DIR</th><th>TARGET_DIR</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead>
+        <thead><tr><th>ID</th><th>SYNC_TYPES</th><th>WATCH_DIR</th><th>TARGET_DIR</th><th>是否回传</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead>
         <tbody id="cfg_tbody"></tbody>
       </table>
     </div>
@@ -91,6 +91,8 @@
           <input id="add_target_dir" type="text" placeholder="" value="">
           <label for="add_enabled">启用状态</label>
           <label class="cfg-enabled"><input id="add_enabled" type="checkbox" checked> 启用</label>
+          <label for="add_is_feedback">是否回传</label>
+          <label class="cfg-enabled"><input id="add_is_feedback" type="checkbox"> 回传（跳过 zip_record 入库）</label>
         </div>
         <div class="modal-actions">
           <button id="cfg_add_cancel_btn" type="button">取消</button>
@@ -191,6 +193,7 @@
           <td>${esc(x.sync_types)}</td>
           <td class="mono">${esc(x.watch_dir)}</td>
           <td class="mono">${esc(x.target_dir)}</td>
+          <td>${x.is_feedback ? '<span class="warn">是</span>' : '<span>否</span>'}</td>
           <td>${x.enabled ? '<span class="ok">启用</span>' : '<span class="warn">停用</span>'}</td>
           <td>${esc(x.updated_at || '-')}</td>
           <td>
@@ -200,7 +203,7 @@
         </tr>
       `).join('');
       if (!state.configs.length) {
-        tbody.innerHTML = '<tr><td colspan="7" class="muted">暂无配置，请先新增。</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="muted">暂无配置，请先新增。</td></tr>';
       }
     }
 
@@ -224,13 +227,14 @@
       const watch_dir = document.getElementById('add_watch_dir').value.trim();
       const target_dir = document.getElementById('add_target_dir').value.trim();
       const enabled = document.getElementById('add_enabled').checked;
+      const is_feedback = document.getElementById('add_is_feedback').checked;
 
       if (!sync_types || !watch_dir || !target_dir) {
         alert('SYNC_TYPES/WATCH_DIR/TARGET_DIR 都不能为空');
         return;
       }
 
-      const payload = { id: id || null, sync_types, watch_dir, target_dir, enabled };
+      const payload = { id: id || null, sync_types, watch_dir, target_dir, enabled, is_feedback };
       const data = await fetchJson('/api/map-path-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -250,6 +254,7 @@
       document.getElementById('add_watch_dir').value = item.watch_dir || '';
       document.getElementById('add_target_dir').value = item.target_dir || '';
       document.getElementById('add_enabled').checked = Boolean(item.enabled);
+      document.getElementById('add_is_feedback').checked = Boolean(item.is_feedback);
       document.getElementById('cfg_add_modal_title').textContent = '编辑来料路径配置';
       document.getElementById('cfg_add_save_btn').textContent = '确认更新';
       document.getElementById('cfg_add_modal').classList.add('show');
@@ -257,10 +262,11 @@
 
     function clearModalForm() {
       document.getElementById('add_id').value = '';
-      document.getElementById('add_sync_types').value = 'BP';
-      document.getElementById('add_watch_dir').value = 'C:\\\\Users\\\\Administrator\\\\Desktop\\\\nassync\\\\A\\\\BP\\\\WAFER_MAP';
-      document.getElementById('add_target_dir').value = 'C:\\\\Users\\\\Administrator\\\\Desktop\\\\nassync\\\\B\\\\BP\\\\WAFER_MAP';
+      document.getElementById('add_sync_types').value = '';
+      document.getElementById('add_watch_dir').value = '';
+      document.getElementById('add_target_dir').value = '';
       document.getElementById('add_enabled').checked = true;
+      document.getElementById('add_is_feedback').checked = false;
       document.getElementById('cfg_add_modal_title').textContent = '新增来料路径配置';
       document.getElementById('cfg_add_save_btn').textContent = '确认新增';
     }

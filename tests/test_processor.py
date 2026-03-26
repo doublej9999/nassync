@@ -280,3 +280,37 @@ def test_process_rolls_back_move_when_insert_failed(tmp_path: Path):
     assert (watch_dir / "BACKUP" / "ABC123.zip").exists() is True
     assert pg.conn.commits == 0
     assert pg.conn.rollbacks == 1
+
+
+def test_process_feedback_skips_zip_record_insert(tmp_path: Path):
+    watch_dir = tmp_path / "A" / "BP" / "WAFER_MAP"
+    target_dir = tmp_path / "B" / "BP" / "WAFER_MAP"
+    watch_dir.mkdir(parents=True, exist_ok=True)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    zip_path = watch_dir / "ABC123.zip"
+
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("ABC123-01.MAP", "MAP-DATA")
+
+    cfg = Config(
+        WATCH_DIR=tmp_path / "A",
+        TARGET_DIR=tmp_path / "B",
+        LOG_DIR=tmp_path / "logs",
+        FILE_STABLE_CHECK_TIMES=1,
+        FILE_STABLE_CHECK_INTERVAL_SEC=0.01,
+    )
+    route = {
+        "sync_type": "BP_FROM_DB",
+        "watch_dir": str(watch_dir),
+        "target_dir": str(target_dir),
+        "is_feedback": True,
+    }
+    pg = TxPg(route=route, fail_insert=False)
+    processor = Processor(cfg, pg=pg)
+
+    ok = processor._process(zip_path)
+
+    assert ok is True
+    assert len(pg.insert_calls) == 0
+    assert pg.conn.commits == 1
+    assert pg.conn.rollbacks == 0

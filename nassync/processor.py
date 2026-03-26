@@ -41,6 +41,7 @@ class Processor:
                     "rec_type": rec_type,
                     "watch_dir": Path(row["watch_dir"]),
                     "target_dir": Path(row["target_dir"]),
+                    "is_feedback": bool(row.get("is_feedback")),
                     "source": "map_path_config",
                 }
             return None
@@ -63,6 +64,7 @@ class Processor:
             "rec_type": rec_type,
             "watch_dir": self.cfg.WATCH_DIR,
             "target_dir": self.cfg.TARGET_DIR / rel.parent,
+            "is_feedback": False,
             "source": "config_json",
         }
 
@@ -251,6 +253,7 @@ class Processor:
 
         rec_type = route["rec_type"]
         target_dir = Path(route["target_dir"])
+        is_feedback = bool(route.get("is_feedback"))
 
         if not path.exists():
             logger.info("跳过（文件不存在，可能已处理）：%s", path)
@@ -293,21 +296,25 @@ class Processor:
 
             lot_wafer_pairs = self.scan_zip(working_zip_path)
 
-            self.pg.insert_records(
-                rec_type,
-                lot_wafer_pairs,
-                working_zip_path.name,
-                str(working_zip_path),
-                conn=conn,
-            )
+            if is_feedback:
+                logger.info("命中回传配置，跳过 zip_record 入库：%s", working_zip_path)
+            else:
+                self.pg.insert_records(
+                    rec_type,
+                    lot_wafer_pairs,
+                    working_zip_path.name,
+                    str(working_zip_path),
+                    conn=conn,
+                )
             conn.commit()
 
             logger.info(
-                "完成：%s -> %s，备份=%s，入库类型=%s",
+                "完成：%s -> %s，备份=%s，入库类型=%s，是否回传=%s",
                 source_zip_path,
                 working_zip_path,
                 backup_zip_path,
                 rec_type,
+                "是" if is_feedback else "否",
             )
             return True
         except Exception as ex:

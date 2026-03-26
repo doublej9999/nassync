@@ -41,11 +41,15 @@ CREATE TABLE IF NOT EXISTS map_path_config (
     sync_types VARCHAR(50) NOT NULL,
     watch_dir VARCHAR(1000) NOT NULL,
     target_dir VARCHAR(1000) NOT NULL,
+    is_feedback BOOLEAN NOT NULL DEFAULT FALSE,
     enabled BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_map_path_config_watch UNIQUE (watch_dir)
 );
+
+ALTER TABLE map_path_config
+ADD COLUMN IF NOT EXISTS is_feedback BOOLEAN NOT NULL DEFAULT FALSE;
 
 CREATE INDEX IF NOT EXISTS idx_map_path_config_enabled
 ON map_path_config (enabled, sync_types);
