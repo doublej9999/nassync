@@ -3,9 +3,10 @@
 一个用于 **NAS 目录自动监听** 的小工具：
 
 - 监听 `A` 目录下新增/变更的 `.zip` 文件
+- 支持在页面维护 `map_path_config`（`WATCH_DIR`/`TARGET_DIR`/`SYNC_TYPES`）
 - 校验并解压其中 `.MAP` 文件到 `B` 目录
 - 提取 `LOT/WAFER` 信息写入 PostgreSQL
-- 将已处理 ZIP 移动到同级 `BACKUP` 目录
+- 将 ZIP 从 `WATCH_DIR` 搬运到 `TARGET_DIR` 后再入库
 - 提供 Web 监控页面查看任务状态与入库记录
 
 ## 1. 项目结构
@@ -45,8 +46,9 @@ nassync/
 
 1. 抽取并复制 `.MAP` 到：`{TARGET_DIR}/{TYPE}/WAFER_MAP/`
 2. 向 `zip_record` 写入去重记录（唯一键：`type + lot_id + wafer_id`）
-3. 更新 `zip_task_status` 状态为 `SUCCESS`
-4. 将 ZIP 移动到同目录 `BACKUP` 下
+3. 将 ZIP 从 `WATCH_DIR` 搬运到 `TARGET_DIR`
+4. 写入 `zip_record`/`zip_task_status`
+5. 失败时回滚数据库事务，并回滚 ZIP 搬运和已解压 MAP 文件
 
 ## 3. 数据库初始化
 
@@ -57,7 +59,7 @@ nassync/
 \i ddl.sql
 ```
 
-或手动执行 `ddl.sql` 中的建表语句（包含 `zip_record` 与 `zip_task_status` 两张表）。
+或手动执行 `ddl.sql` 中的建表语句（包含 `zip_record`、`zip_task_status`、`map_path_config` 三张表）。
 
 ## 4. 环境依赖
 
@@ -98,7 +100,7 @@ pip install -r requirements.txt
   - `TASK_QUEUE_MAX_SIZE` / `EVENT_DEDUP_WINDOW_SEC` / `DASHBOARD_CACHE_TTL_SEC`
   - `INITIAL_SCAN`（启动时是否扫描历史 ZIP）
 - Web 面板：`WEB_HOST`、`WEB_PORT`
-- 同步控制：`SYNC_TYPES`（填写 `["BP","CD"]` 等类型，留空或不配置时同步所有）
+- 同步控制：`SYNC_TYPES` 作为回退配置；生产建议通过页面写入 `map_path_config.sync_types`
 
 示例（本地目录）：
 
@@ -132,7 +134,7 @@ pip install -r requirements.txt
   "WEB_PORT": 8080
 }
 
-`SYNC_TYPES` 中只会同步列表内的目录，所有值会自动变成大写，省略该字段或提供空数组则同步全部类型。
+`SYNC_TYPES` 为回退项。若 `map_path_config` 已配置，以表内的 `sync_types` 为准。
 ```
 
 示例（NAS 目录）：
@@ -204,6 +206,10 @@ dist\windows\nassync.exe
 
 - 页面：`/dashboard`
 - 数据接口：`/api/dashboard`
+- 路径配置接口：
+  - `GET /api/map-path-config`
+  - `POST /api/map-path-config`
+  - `POST /api/map-path-config/delete`
 
 接口支持分页与关键词筛选参数：
 
@@ -229,7 +235,7 @@ dist\windows\nassync.exe
 1. 创建目录：`A/<TYPE>/WAFER_MAP`
 2. 投放一个测试 ZIP（含合法命名 `.MAP` 文件）
 3. 观察：
-   - ZIP 被移动到 `A/<TYPE>/WAFER_MAP/BACKUP`
+   - ZIP 被移动到 `B/<TYPE>/WAFER_MAP`（或你在页面配置的 `TARGET_DIR`）
    - MAP 出现在 `B/<TYPE>/WAFER_MAP`
    - 数据库两张表有对应记录
    - `/dashboard` 展示任务状态

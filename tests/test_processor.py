@@ -106,6 +106,48 @@ class DummyPg:
         return None
 
 
+class _TxConn:
+    def __init__(self):
+        self.commits = 0
+        self.rollbacks = 0
+
+    def commit(self):
+        self.commits += 1
+
+    def rollback(self):
+        self.rollbacks += 1
+
+
+class TxPg:
+    def __init__(self, route, fail_insert=False):
+        self.route = route
+        self.fail_insert = fail_insert
+        self.conn = _TxConn()
+        self.insert_calls = []
+
+    def match_map_path_config(self, _path):
+        return self.route
+
+    def acquire_connection(self):
+        return "pool", self.conn
+
+    def release_connection(self, _pool, _conn):
+        return None
+
+    def insert_records(self, rec_type, lot_wafer_pairs, zip_name, zip_path, conn=None):
+        self.insert_calls.append(
+            {
+                "rec_type": rec_type,
+                "lot_wafer_pairs": lot_wafer_pairs,
+                "zip_name": zip_name,
+                "zip_path": zip_path,
+                "conn_is_same": conn is self.conn,
+            }
+        )
+        if self.fail_insert:
+            raise RuntimeError("db insert failed")
+
+
 def test_process_retryable_error_returns_delay_and_no_failed(tmp_path: Path):
     watch_dir = tmp_path / "A"
     target_dir = tmp_path / "B"
@@ -165,3 +207,78 @@ def test_process_non_retryable_error_marks_failed(tmp_path: Path):
     assert delay is None
     statuses = [item["status"] for item in pg.status_calls]
     assert statuses[-1] == "FAILED"
+
+
+def test_process_moves_zip_and_uses_type_from_map_path_config(tmp_path: Path):
+    watch_dir = tmp_path / "A" / "BP" / "WAFER_MAP"
+    target_dir = tmp_path / "B" / "BP" / "WAFER_MAP"
+    watch_dir.mkdir(parents=True, exist_ok=True)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    zip_path = watch_dir / "ABC123.zip"
+
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("ABC123-01.MAP", "MAP-DATA")
+
+    cfg = Config(
+        WATCH_DIR=tmp_path / "A",
+        TARGET_DIR=tmp_path / "B",
+        LOG_DIR=tmp_path / "logs",
+        FILE_STABLE_CHECK_TIMES=1,
+        FILE_STABLE_CHECK_INTERVAL_SEC=0.01,
+    )
+    route = {
+        "sync_type": "BP_FROM_DB",
+        "watch_dir": str(watch_dir),
+        "target_dir": str(target_dir),
+    }
+    pg = TxPg(route=route, fail_insert=False)
+    processor = Processor(cfg, pg=pg)
+
+    ok = processor._process(zip_path)
+
+    assert ok is True
+    assert zip_path.exists() is False
+    moved_zip = target_dir / "ABC123.zip"
+    assert moved_zip.exists() is True
+    extracted = target_dir / "ABC123-01.MAP"
+    assert extracted.exists() is True
+    assert extracted.read_text(encoding="utf-8") == "MAP-DATA"
+    assert pg.insert_calls[0]["rec_type"] == "BP_FROM_DB"
+    assert pg.insert_calls[0]["conn_is_same"] is True
+    assert pg.conn.commits == 1
+    assert pg.conn.rollbacks == 0
+
+
+def test_process_rolls_back_move_and_map_when_insert_failed(tmp_path: Path):
+    watch_dir = tmp_path / "A" / "BP" / "WAFER_MAP"
+    target_dir = tmp_path / "B" / "BP" / "WAFER_MAP"
+    watch_dir.mkdir(parents=True, exist_ok=True)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    zip_path = watch_dir / "ABC123.zip"
+
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("ABC123-01.MAP", "MAP-DATA")
+
+    cfg = Config(
+        WATCH_DIR=tmp_path / "A",
+        TARGET_DIR=tmp_path / "B",
+        LOG_DIR=tmp_path / "logs",
+        FILE_STABLE_CHECK_TIMES=1,
+        FILE_STABLE_CHECK_INTERVAL_SEC=0.01,
+    )
+    route = {
+        "sync_type": "BP_FROM_DB",
+        "watch_dir": str(watch_dir),
+        "target_dir": str(target_dir),
+    }
+    pg = TxPg(route=route, fail_insert=True)
+    processor = Processor(cfg, pg=pg)
+
+    with pytest.raises(RuntimeError, match="db insert failed"):
+        processor._process(zip_path)
+
+    assert zip_path.exists() is True
+    assert (target_dir / "ABC123.zip").exists() is False
+    assert (target_dir / "ABC123-01.MAP").exists() is False
+    assert pg.conn.commits == 0
+    assert pg.conn.rollbacks == 1

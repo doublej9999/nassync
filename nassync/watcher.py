@@ -69,6 +69,7 @@ class ServiceLifecycle:
             self.set_observer(observer)
         self._web_running = threading.Event()
         self._shutdown_requested = threading.Event()
+        self._reload_requested = threading.Event()
 
     def mark_web_started(self):
         self._web_running.set()
@@ -80,6 +81,15 @@ class ServiceLifecycle:
         if not self._shutdown_requested.is_set():
             self._shutdown_requested.set()
             self.handler.disable()
+
+    def request_reload(self):
+        self._reload_requested.set()
+
+    def consume_reload_request(self):
+        if self._reload_requested.is_set():
+            self._reload_requested.clear()
+            return True
+        return False
 
     def set_observer(self, observer: Observer):
         with self._observer_lock:

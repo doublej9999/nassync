@@ -7,7 +7,7 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from .config import Config
+from .config import Config, normalize_dir_path
 from .db import PgClient
 from .watcher import ServiceLifecycle
 
@@ -40,10 +40,38 @@ def create_dashboard_handler(pg: PgClient, lifecycle: ServiceLifecycle, cfg: Con
             self.end_headers()
             self.wfile.write(body)
 
+        def _read_json_body(self):
+            try:
+                content_len = int(self.headers.get("Content-Length") or "0")
+            except ValueError:
+                return None
+            if content_len <= 0:
+                return None
+            raw = self.rfile.read(content_len)
+            try:
+                payload = json.loads(raw.decode("utf-8"))
+            except Exception:
+                return None
+            if not isinstance(payload, dict):
+                return None
+            return payload
+
         def do_GET(self):
             parsed = urlparse(self.path)
             if parsed.path in ("/", "/dashboard"):
                 self._send_html(DASHBOARD_HTML)
+                return
+
+            if parsed.path == "/api/map-path-config":
+                try:
+                    rows = pg.get_map_path_configs(only_enabled=False)
+                except Exception as ex:
+                    self._send_json(
+                        {"error": f"读取 map_path_config 失败：{ex}"},
+                        status=HTTPStatus.SERVICE_UNAVAILABLE,
+                    )
+                    return
+                self._send_json({"items": rows})
                 return
 
             if parsed.path == "/healthz":
@@ -118,7 +146,10 @@ def create_dashboard_handler(pg: PgClient, lifecycle: ServiceLifecycle, cfg: Con
                         degraded_payload = dict(stale)
                         degraded_payload["degraded"] = True
                         degraded_payload["error"] = "数据库暂不可用，返回缓存数据"
-                        self._send_json(degraded_payload, status=HTTPStatus.SERVICE_UNAVAILABLE)
+                        self._send_json(
+                            degraded_payload,
+                            status=HTTPStatus.SERVICE_UNAVAILABLE,
+                        )
                         return
                     self._send_json(
                         {"error": "数据库暂不可用，请稍后重试"},
@@ -133,6 +164,82 @@ def create_dashboard_handler(pg: PgClient, lifecycle: ServiceLifecycle, cfg: Con
                         cache_expire_at = now + cache_ttl_sec
 
                 self._send_json(data)
+                return
+
+            self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
+
+        def do_POST(self):
+            parsed = urlparse(self.path)
+
+            if parsed.path == "/api/map-path-config":
+                payload = self._read_json_body()
+                if not payload:
+                    self._send_json(
+                        {"error": "请求体必须是 JSON 对象"},
+                        status=HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+
+                sync_types = (payload.get("sync_types") or "").strip().upper()
+                watch_dir_raw = payload.get("watch_dir")
+                target_dir_raw = payload.get("target_dir")
+                enabled = payload.get("enabled", True)
+
+                if not sync_types:
+                    self._send_json(
+                        {"error": "SYNC_TYPES 不能为空"},
+                        status=HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+
+                try:
+                    watch_dir = normalize_dir_path(watch_dir_raw)
+                    target_dir = normalize_dir_path(target_dir_raw)
+                except Exception as ex:
+                    self._send_json(
+                        {"error": f"路径格式不合法：{ex}"},
+                        status=HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+
+                try:
+                    pg.upsert_map_path_config(
+                        sync_types=sync_types,
+                        watch_dir=str(watch_dir),
+                        target_dir=str(target_dir),
+                        enabled=bool(enabled),
+                    )
+                    lifecycle.request_reload()
+                    rows = pg.get_map_path_configs(only_enabled=False)
+                except Exception as ex:
+                    self._send_json(
+                        {"error": f"保存 map_path_config 失败：{ex}"},
+                        status=HTTPStatus.SERVICE_UNAVAILABLE,
+                    )
+                    return
+
+                self._send_json({"ok": True, "items": rows})
+                return
+
+            if parsed.path == "/api/map-path-config/delete":
+                payload = self._read_json_body()
+                if not payload or "id" not in payload:
+                    self._send_json(
+                        {"error": "必须提供 id"},
+                        status=HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+                try:
+                    pg.delete_map_path_config(payload.get("id"))
+                    lifecycle.request_reload()
+                    rows = pg.get_map_path_configs(only_enabled=False)
+                except Exception as ex:
+                    self._send_json(
+                        {"error": f"删除 map_path_config 失败：{ex}"},
+                        status=HTTPStatus.SERVICE_UNAVAILABLE,
+                    )
+                    return
+                self._send_json({"ok": True, "items": rows})
                 return
 
             self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)

@@ -1,5 +1,6 @@
 ﻿import errno
 import logging
+import os
 import re
 import shutil
 import threading
@@ -23,25 +24,50 @@ class Processor:
         self.lock = threading.Lock()
         self.sync_types = set(cfg.SYNC_TYPES)
 
-    def is_valid(self, path: Path):
+    def _resolve_route(self, path: Path):
         if path.suffix.lower() != ".zip":
-            return False
+            return None
 
         if "BACKUP" in [p.upper() for p in path.parts]:
-            return False
+            return None
+
+        if self.pg is not None and hasattr(self.pg, "match_map_path_config"):
+            row = self.pg.match_map_path_config(path)
+            if row:
+                rec_type = (row.get("sync_type") or "").strip().upper()
+                if not rec_type:
+                    return None
+                return {
+                    "rec_type": rec_type,
+                    "watch_dir": Path(row["watch_dir"]),
+                    "target_dir": Path(row["target_dir"]),
+                    "source": "map_path_config",
+                }
+            return None
 
         try:
             rel = path.relative_to(self.cfg.WATCH_DIR)
         except Exception:
-            return False
+            return None
 
         if len(rel.parts) < 3:
-            return False
-
+            return None
         if rel.parts[-2].upper() != "WAFER_MAP":
-            return False
+            return None
 
-        return True
+        rec_type = rel.parts[-3].upper()
+        if self.sync_types and rec_type not in self.sync_types:
+            return None
+
+        return {
+            "rec_type": rec_type,
+            "watch_dir": self.cfg.WATCH_DIR,
+            "target_dir": self.cfg.TARGET_DIR / rel.parent,
+            "source": "config_json",
+        }
+
+    def is_valid(self, path: Path):
+        return self._resolve_route(path) is not None
 
     def wait_stable(self, path: Path):
         last = None
@@ -65,22 +91,12 @@ class Processor:
         return False
 
     def process(self, path: Path):
-        if not self.is_valid(path):
-            logger.info("跳过（不符合规则）：%s", path)
+        route = self._resolve_route(path)
+        if not route:
+            logger.info("跳过（不符合规则或未配置 map_path_config）：%s", path)
             return None
 
-        rel = path.relative_to(self.cfg.WATCH_DIR)
-        rec_type = rel.parts[-3]
-        rec_type_upper = rec_type.upper()
-        if self.sync_types and rec_type_upper not in self.sync_types:
-            logger.info(
-                "跳过（类型未配置）：%s type=%s",
-                path,
-                rec_type_upper,
-            )
-            return None
-        rec_type = rec_type_upper
-
+        rec_type = route["rec_type"]
         key = str(path)
         with self.lock:
             if key in self.processing:
@@ -128,13 +144,13 @@ class Processor:
                             summarize_error_msg(ex),
                         )
                         return deferred_delay
-                    else:
-                        logger.warning(
-                            "处理失败（不可重试）：%s, err=%s",
-                            path,
-                            summarize_error_msg(ex),
-                        )
-                        break
+
+                    logger.warning(
+                        "处理失败（不可重试）：%s, err=%s",
+                        path,
+                        summarize_error_msg(ex),
+                    )
+                    break
 
             failure_reason = (
                 f"{type(last_error).__name__}: {last_error}"
@@ -198,36 +214,137 @@ class Processor:
             return True
         return False
 
+    @staticmethod
+    def _same_path(a: Path, b: Path) -> bool:
+        return os.path.normcase(os.path.normpath(str(a))) == os.path.normcase(
+            os.path.normpath(str(b))
+        )
+
+    def _rollback_file_changes(
+        self,
+        source_zip_path: Path,
+        target_zip_path: Path,
+        moved_zip: bool,
+        extracted_paths: list[Path],
+    ):
+        errors = []
+
+        for map_file in extracted_paths:
+            try:
+                if map_file.exists():
+                    map_file.unlink()
+            except Exception as ex:
+                errors.append(f"删除已提取 MAP 失败: {map_file} ({ex})")
+
+        if moved_zip:
+            try:
+                if target_zip_path.exists():
+                    source_zip_path.parent.mkdir(parents=True, exist_ok=True)
+                    if source_zip_path.exists():
+                        source_zip_path.unlink()
+                    shutil.move(str(target_zip_path), str(source_zip_path))
+            except Exception as ex:
+                errors.append(
+                    f"回滚 ZIP 失败: {target_zip_path} -> {source_zip_path} ({ex})"
+                )
+
+        if errors:
+            raise RuntimeError("; ".join(errors))
+
     def _process(self, path: Path):
+        route = self._resolve_route(path)
+        if not route:
+            logger.info("跳过（未命中 map_path_config）：%s", path)
+            return True
+
+        rec_type = route["rec_type"]
+        target_dir = Path(route["target_dir"])
+
         if not path.exists():
             logger.info("跳过（文件不存在，可能已处理）：%s", path)
             return True
 
-        logger.info("处理：%s", path)
+        logger.info(
+            "处理：%s，SYNC_TYPES=%s，WATCH_DIR=%s，TARGET_DIR=%s",
+            path,
+            rec_type,
+            route["watch_dir"],
+            target_dir,
+        )
 
         if not self.wait_stable(path):
             raise RetryableProcessError("文件未稳定")
 
-        rel = path.relative_to(self.cfg.WATCH_DIR)
-        rec_type = rel.parts[-3].upper()
-        target_dir = self.cfg.TARGET_DIR / rel.parent
-        backup_dir = path.parent / "BACKUP"
-        backup_zip_path = backup_dir / path.name
+        source_zip_path = path
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target_zip_path = target_dir / path.name
 
-        lot_wafer_pairs = self.scan_zip(path, target_dir)
+        active_pool = None
+        conn = None
+        moved_zip = False
+        extracted_paths = []
 
-        self.pg.insert_records(rec_type, lot_wafer_pairs, path.name, str(path))
+        try:
+            active_pool, conn = self.pg.acquire_connection()
+            working_zip_path = source_zip_path
 
-        backup_dir.mkdir(parents=True, exist_ok=True)
-        if backup_zip_path.exists():
-            backup_zip_path.unlink()
-        shutil.move(str(path), str(backup_zip_path))
+            if not self._same_path(source_zip_path, target_zip_path):
+                if target_zip_path.exists():
+                    target_zip_path.unlink()
+                shutil.move(str(source_zip_path), str(target_zip_path))
+                moved_zip = True
+                working_zip_path = target_zip_path
 
-        logger.info("完成：%s -> %s，MAP 已解压到 %s", path, backup_zip_path, target_dir)
-        return True
+            lot_wafer_pairs, extracted_paths = self.scan_zip(
+                working_zip_path,
+                target_dir,
+                collect_written_paths=True,
+            )
 
-    def scan_zip(self, zip_path, target_dir: Path):
+            self.pg.insert_records(
+                rec_type,
+                lot_wafer_pairs,
+                working_zip_path.name,
+                str(working_zip_path),
+                conn=conn,
+            )
+            conn.commit()
+
+            logger.info(
+                "完成：%s -> %s，MAP 已解压到 %s，入库类型=%s",
+                source_zip_path,
+                working_zip_path,
+                target_dir,
+                rec_type,
+            )
+            return True
+        except Exception as ex:
+            if conn is not None:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+
+            try:
+                self._rollback_file_changes(
+                    source_zip_path,
+                    target_zip_path,
+                    moved_zip,
+                    extracted_paths,
+                )
+            except Exception as rollback_ex:
+                raise RetryableProcessError(
+                    f"处理失败且回滚异常: {summarize_error_msg(ex)}; rollback={rollback_ex}"
+                ) from ex
+
+            raise
+        finally:
+            if self.pg is not None and active_pool is not None and conn is not None:
+                self.pg.release_connection(active_pool, conn)
+
+    def scan_zip(self, zip_path, target_dir: Path, collect_written_paths=False):
         lot_wafer_pairs = []
+        written_paths = []
         map_name_pattern = re.compile(r"^([A-Za-z0-9]{6})-([A-Za-z0-9]{2})$")
         zip_prefix = Path(zip_path).stem.split("-", 1)[0].upper()
         map_entries = []
@@ -275,5 +392,9 @@ class Processor:
                 with z.open(info, "r") as src, temp_path.open("wb") as dst:
                     shutil.copyfileobj(src, dst)
                 temp_path.replace(target_map_path)
+                written_paths.append(target_map_path)
 
-            return sorted(set(lot_wafer_pairs))
+            pairs = sorted(set(lot_wafer_pairs))
+            if collect_written_paths:
+                return pairs, written_paths
+            return pairs

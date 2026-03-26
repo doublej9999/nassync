@@ -8,8 +8,8 @@ from urllib.parse import unquote, urlparse
 
 @dataclass(frozen=True)
 class Config:
-    WATCH_DIR: Path = Path(r"C:\Users\Administrator\Desktop\nassync\A")
-    TARGET_DIR: Path = Path(r"C:\Users\Administrator\Desktop\nassync\B")
+    WATCH_DIR: Path = Path(r"C:\Users\Administrator\Desktop\nassync\A\BP\WAFER_MAP")
+    TARGET_DIR: Path = Path(r"C:\Users\Administrator\Desktop\nassync\B\BP\WAFER_MAP")
 
     DB_HOST: str = "localhost"
     DB_PORT: int = 5432

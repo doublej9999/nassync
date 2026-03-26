@@ -1,6 +1,6 @@
-{
-  "WATCH_DIR": "C:\\Users\\Administrator\\Desktop\\nassync\\A",
-  "TARGET_DIR": "C:\\Users\\Administrator\\Desktop\\nassync\\B",
+﻿{
+  "WATCH_DIR": "C:\\Users\\Administrator\\Desktop\\nassync\\A\\BP\\WAFER_MAP",
+  "TARGET_DIR": "C:\\Users\\Administrator\\Desktop\\nassync\\B\\BP\\WAFER_MAP",
   "DB_HOST": "localhost",
   "DB_PORT": 5432,
   "DB_NAME": "postgres",
@@ -28,3 +28,4 @@
   "WEB_HOST": "0.0.0.0",
   "WEB_PORT": 8080
 }
+

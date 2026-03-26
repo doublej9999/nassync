@@ -1,6 +1,7 @@
-import logging
+﻿import logging
 import threading
 import time
+from pathlib import Path
 from http.server import ThreadingHTTPServer
 
 from watchdog.observers import Observer
@@ -18,9 +19,14 @@ from .workers import TaskWorkerPool
 logger = logging.getLogger("watcher")
 
 
-def _create_observer(watch_dir):
-    if is_nas_path(watch_dir):
-        logger.info("检测到 NAS 目录，监听器切换为轮询模式：%s", watch_dir)
+def _create_observer(watch_dirs):
+    if isinstance(watch_dirs, (str, Path)):
+        dirs = [Path(watch_dirs)]
+    else:
+        dirs = [Path(item) for item in watch_dirs]
+
+    if any(is_nas_path(item) for item in dirs):
+        logger.info("检测到 NAS 目录，监听器切换为轮询模式")
         return PollingObserver(timeout=1.0)
     return Observer()
 
@@ -31,6 +37,11 @@ def main():
     setup_logging(cfg)
 
     pg = PgClient(cfg)
+    try:
+        pg.ensure_default_map_path_config()
+    except Exception as ex:
+        logger.warning("初始化 map_path_config 默认配置失败：%s", summarize_error_msg(ex))
+
     processor = Processor(cfg, pg)
     worker_pool = TaskWorkerPool(processor, max_queue_size=cfg.TASK_QUEUE_MAX_SIZE)
 
@@ -38,23 +49,59 @@ def main():
     lifecycle = ServiceLifecycle(handler)
     watch_retry_interval = max(1.0, float(cfg.PROCESS_RETRY_INTERVAL_SEC))
     last_watch_attempt_at = 0.0
-    initial_scan_done = False
 
-    def run_initial_scan_once():
-        nonlocal initial_scan_done
-        if initial_scan_done or not cfg.INITIAL_SCAN:
+    scanned_watch_dirs = set()
+    current_watch_key = tuple()
+
+    def load_watch_dirs():
+        watch_dirs = []
+        try:
+            watch_dirs = [Path(item) for item in pg.get_active_watch_dirs() if item]
+        except Exception as ex:
+            logger.warning("读取 map_path_config 失败，回退到 config WATCH_DIR：%s", summarize_error_msg(ex))
+
+        if not watch_dirs:
+            watch_dirs = [cfg.WATCH_DIR]
+
+        unique_dirs = []
+        seen = set()
+        for item in watch_dirs:
+            key = str(item).lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            unique_dirs.append(item)
+        return unique_dirs
+
+    def run_initial_scan_for_dir(watch_dir: Path):
+        key = str(watch_dir).lower()
+        if key in scanned_watch_dirs:
             return
-        for f in cfg.WATCH_DIR.rglob("*"):
+        if not cfg.INITIAL_SCAN:
+            return
+
+        for f in watch_dir.rglob("*"):
             if f.is_file() and f.suffix.lower() == ".zip":
                 handler._handle_event(f)
-        initial_scan_done = True
-        logger.info("启动扫描完成")
+
+        scanned_watch_dirs.add(key)
+        logger.info("启动扫描完成：%s", watch_dir)
 
     def ensure_observer_running(force=False):
-        nonlocal last_watch_attempt_at
+        nonlocal last_watch_attempt_at, current_watch_key
 
         observer = lifecycle.get_observer()
-        if observer is not None and observer.is_alive():
+        reload_requested = lifecycle.consume_reload_request()
+        watch_dirs = load_watch_dirs()
+        watch_key = tuple(sorted(str(x).lower() for x in watch_dirs))
+
+        if (
+            observer is not None
+            and observer.is_alive()
+            and not force
+            and not reload_requested
+            and watch_key == current_watch_key
+        ):
             return
 
         now = time.monotonic()
@@ -62,15 +109,20 @@ def main():
             return
         last_watch_attempt_at = now
 
-        try:
-            if not cfg.WATCH_DIR.exists() or not cfg.WATCH_DIR.is_dir():
+        usable_watch_dirs = []
+        for watch_dir in watch_dirs:
+            if watch_dir.exists() and watch_dir.is_dir():
+                usable_watch_dirs.append(watch_dir)
+            else:
                 logger.warning(
-                    "监听目录不可用，%.1fs 后重试：%s",
-                    watch_retry_interval,
-                    cfg.WATCH_DIR,
+                    "监听目录不可用：%s（将继续重试）",
+                    watch_dir,
                 )
-                return
 
+        if not usable_watch_dirs:
+            return
+
+        try:
             if observer is not None:
                 try:
                     observer.stop()
@@ -78,12 +130,17 @@ def main():
                 except Exception:
                     pass
 
-            new_observer = _create_observer(cfg.WATCH_DIR)
-            new_observer.schedule(handler, str(cfg.WATCH_DIR), recursive=True)
+            new_observer = _create_observer(usable_watch_dirs)
+            for watch_dir in usable_watch_dirs:
+                new_observer.schedule(handler, str(watch_dir), recursive=True)
+
             new_observer.start()
             lifecycle.set_observer(new_observer)
-            logger.info("启动监听：%s", cfg.WATCH_DIR)
-            run_initial_scan_once()
+            current_watch_key = tuple(sorted(str(x).lower() for x in usable_watch_dirs))
+            logger.info("启动监听目录：%s", ", ".join(str(x) for x in usable_watch_dirs))
+
+            for watch_dir in usable_watch_dirs:
+                run_initial_scan_for_dir(watch_dir)
         except Exception as ex:
             logger.warning(
                 "监听启动失败，%.1fs 后重试，err=%s",

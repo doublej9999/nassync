@@ -14,9 +14,11 @@
       --warn: #b45309;
       --err: #b91c1c;
       --border: #e5e7eb;
+      --accent: #0f766e;
+      --accent-light: #e6fffa;
     }
     body { margin: 0; font-family: "Microsoft YaHei", "PingFang SC", sans-serif; background: var(--bg); color: var(--text); }
-    .wrap { max-width: 1280px; margin: 0 auto; padding: 16px; }
+    .wrap { max-width: 1320px; margin: 0 auto; padding: 16px; }
     .title { font-size: 24px; font-weight: 700; margin: 8px 0; }
     .sub { color: var(--muted); margin-bottom: 16px; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(180px,1fr)); gap: 12px; }
@@ -42,12 +44,41 @@
     .status.PENDING { background: var(--warn); }
     .status.FAILED { background: var(--err); }
     .meta { margin-top: 12px; color: var(--muted); font-size: 12px; display: flex; justify-content: space-between; }
+    .cfg-box { background: var(--accent-light); border: 1px solid #b2f5ea; border-radius: 8px; padding: 10px; margin-bottom: 10px; }
+    .cfg-grid { display: grid; grid-template-columns: 180px 1fr 1fr auto auto; gap: 8px; align-items: center; }
+    .cfg-grid input { width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: 8px; padding: 8px; font-size: 13px; }
+    .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .btn-danger { color: var(--err); }
+    .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
+    .cfg-enabled { white-space: nowrap; }
+    @media (max-width: 980px) {
+      .cfg-grid { grid-template-columns: 1fr; }
+      .cfg-enabled { margin-top: 4px; }
+    }
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="title">NAS 文件同步监控</div>
     <div class="sub">自动刷新间隔：5 秒</div>
+
+    <div class="section">
+      <h2>来料路径配置（map_path_config）</h2>
+      <div class="cfg-box">
+        <div class="cfg-grid">
+          <input id="cfg_sync_types" type="text" placeholder="SYNC_TYPES，例如 BP" value="BP">
+          <input id="cfg_watch_dir" type="text" placeholder="WATCH_DIR" value="C:\\Users\\Administrator\\Desktop\\nassync\\A\\BP\\WAFER_MAP">
+          <input id="cfg_target_dir" type="text" placeholder="TARGET_DIR" value="C:\\Users\\Administrator\\Desktop\\nassync\\B\\BP\\WAFER_MAP">
+          <label class="cfg-enabled"><input id="cfg_enabled" type="checkbox" checked> 启用</label>
+          <button id="cfg_save_btn" class="btn-primary" type="button">保存配置</button>
+        </div>
+        <div class="hint">说明：ZIP 会从 WATCH_DIR 搬运到 TARGET_DIR，再解析 MAP 并按 SYNC_TYPES 入库。</div>
+      </div>
+      <table>
+        <thead><tr><th>ID</th><th>SYNC_TYPES</th><th>WATCH_DIR</th><th>TARGET_DIR</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead>
+        <tbody id="cfg_tbody"></tbody>
+      </table>
+    </div>
 
     <div class="grid">
       <div class="card"><div class="label">任务总数</div><div id="total_tasks" class="value">-</div></div>
@@ -115,11 +146,76 @@
     const state = {
       task: { page: 1, page_size: 20, q: '' },
       record: { page: 1, page_size: 20, q: '' },
+      configs: [],
     };
 
     function esc(v) {
       if (v === null || v === undefined) return '';
       return String(v).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+    }
+
+    async function fetchJson(url, options) {
+      const resp = await fetch(url, options);
+      const data = await resp.json();
+      if (!resp.ok) {
+        throw new Error(data.error || ('请求失败: ' + resp.status));
+      }
+      return data;
+    }
+
+    function renderConfigs(items) {
+      state.configs = items || [];
+      const tbody = document.getElementById('cfg_tbody');
+      tbody.innerHTML = state.configs.map(x => `
+        <tr>
+          <td>${esc(x.id)}</td>
+          <td>${esc(x.sync_types)}</td>
+          <td class="mono">${esc(x.watch_dir)}</td>
+          <td class="mono">${esc(x.target_dir)}</td>
+          <td>${x.enabled ? '<span class="ok">启用</span>' : '<span class="warn">停用</span>'}</td>
+          <td>${esc(x.updated_at || '-')}</td>
+          <td><button class="btn-danger" type="button" onclick="removeConfig(${Number(x.id)})">删除</button></td>
+        </tr>
+      `).join('');
+      if (!state.configs.length) {
+        tbody.innerHTML = '<tr><td colspan="7" class="muted">暂无配置，请先新增。</td></tr>';
+      }
+    }
+
+    async function loadConfigs() {
+      const data = await fetchJson('/api/map-path-config');
+      renderConfigs(data.items || []);
+    }
+
+    async function saveConfig() {
+      const sync_types = document.getElementById('cfg_sync_types').value.trim().toUpperCase();
+      const watch_dir = document.getElementById('cfg_watch_dir').value.trim();
+      const target_dir = document.getElementById('cfg_target_dir').value.trim();
+      const enabled = document.getElementById('cfg_enabled').checked;
+
+      if (!sync_types || !watch_dir || !target_dir) {
+        alert('SYNC_TYPES/WATCH_DIR/TARGET_DIR 都不能为空');
+        return;
+      }
+
+      const payload = { sync_types, watch_dir, target_dir, enabled };
+      const data = await fetchJson('/api/map-path-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      renderConfigs(data.items || []);
+      alert('保存成功，监听目录已刷新');
+    }
+
+    async function removeConfig(id) {
+      if (!window.confirm('确认删除该配置吗？')) return;
+      const data = await fetchJson('/api/map-path-config/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+      renderConfigs(data.items || []);
     }
 
     async function loadData() {
@@ -131,8 +227,7 @@
         record_page_size: String(state.record.page_size),
         record_q: state.record.q,
       });
-      const resp = await fetch('/api/dashboard?' + params.toString());
-      const data = await resp.json();
+      const data = await fetchJson('/api/dashboard?' + params.toString());
       const s = data.summary || {};
 
       document.getElementById('total_tasks').textContent = s.total_tasks ?? 0;
@@ -201,6 +296,14 @@
       const recordQ = document.getElementById('record_q');
       const recordPageSize = document.getElementById('record_page_size');
 
+      document.getElementById('cfg_save_btn').addEventListener('click', async () => {
+        try {
+          await saveConfig();
+        } catch (e) {
+          alert(e.message || '保存失败');
+        }
+      });
+
       document.getElementById('task_search_btn').addEventListener('click', () => {
         state.task.q = taskQ.value.trim();
         state.task.page_size = Number(taskPageSize.value) || 20;
@@ -253,9 +356,9 @@
     }
 
     bindToolbar();
+    loadConfigs().catch(e => console.error('加载配置失败', e));
     tick();
     setInterval(tick, 5000);
   </script>
 </body>
 </html>
-

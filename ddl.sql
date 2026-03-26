@@ -35,3 +35,17 @@ ON zip_task_status (updated_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_zip_task_status_type
 ON zip_task_status (type, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS map_path_config (
+    id BIGSERIAL PRIMARY KEY,
+    sync_types VARCHAR(50) NOT NULL,
+    watch_dir VARCHAR(1000) NOT NULL,
+    target_dir VARCHAR(1000) NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_map_path_config_watch UNIQUE (watch_dir)
+);
+
+CREATE INDEX IF NOT EXISTS idx_map_path_config_enabled
+ON map_path_config (enabled, sync_types);
