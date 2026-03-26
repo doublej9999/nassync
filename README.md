@@ -4,7 +4,7 @@
 
 - 监听 `A` 目录下新增/变更的 `.zip` 文件
 - 支持在页面维护 `map_path_config`（`WATCH_DIR`/`TARGET_DIR`/`SYNC_TYPES`）
-- 校验并解压其中 `.MAP` 文件到 `B` 目录
+- 校验 ZIP 内 `.MAP` 文件名并提取 LOT/WAFER
 - 提取 `LOT/WAFER` 信息写入 PostgreSQL
 - 将 ZIP 从 `WATCH_DIR` 搬运到 `TARGET_DIR` 后再入库
 - 提供 Web 监控页面查看任务状态与入库记录
@@ -46,9 +46,10 @@ nassync/
 
 1. 抽取并复制 `.MAP` 到：`{TARGET_DIR}/{TYPE}/WAFER_MAP/`
 2. 向 `zip_record` 写入去重记录（唯一键：`type + lot_id + wafer_id`）
-3. 将 ZIP 从 `WATCH_DIR` 搬运到 `TARGET_DIR`
-4. 写入 `zip_record`/`zip_task_status`
-5. 失败时回滚数据库事务，并回滚 ZIP 搬运和已解压 MAP 文件
+3. 搬运前先复制一份 ZIP 到 `WATCH_DIR/BACKUP`（若目录不存在自动创建）
+4. 将 ZIP 从 `WATCH_DIR` 搬运到 `TARGET_DIR`
+5. 写入 `zip_record`/`zip_task_status`
+6. 失败时回滚数据库事务，并回滚 ZIP 搬运（不会解压 MAP 文件）
 
 ## 3. 数据库初始化
 

@@ -44,16 +44,21 @@
     .status.PENDING { background: var(--warn); }
     .status.FAILED { background: var(--err); }
     .meta { margin-top: 12px; color: var(--muted); font-size: 12px; display: flex; justify-content: space-between; }
-    .cfg-box { background: var(--accent-light); border: 1px solid #b2f5ea; border-radius: 8px; padding: 10px; margin-bottom: 10px; }
-    .cfg-grid { display: grid; grid-template-columns: 180px 1fr 1fr auto auto; gap: 8px; align-items: center; }
-    .cfg-grid input { width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: 8px; padding: 8px; font-size: 13px; }
     .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
     .btn-danger { color: var(--err); }
-    .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
     .cfg-enabled { white-space: nowrap; }
+    .section-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 12px; }
+    .section-head h2 { margin: 0; }
+    .modal-mask { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.35); display: none; align-items: center; justify-content: center; z-index: 1000; }
+    .modal-mask.show { display: flex; }
+    .modal-card { width: min(760px, calc(100vw - 24px)); background: #fff; border-radius: 10px; border: 1px solid var(--border); padding: 14px; }
+    .modal-title { font-size: 16px; font-weight: 700; margin-bottom: 10px; }
+    .modal-grid { display: grid; grid-template-columns: 140px 1fr; gap: 10px; align-items: center; }
+    .modal-grid input { width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: 8px; padding: 8px; font-size: 13px; }
+    .modal-actions { margin-top: 12px; display: flex; justify-content: flex-end; gap: 8px; }
     @media (max-width: 980px) {
-      .cfg-grid { grid-template-columns: 1fr; }
       .cfg-enabled { margin-top: 4px; }
+      .modal-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -63,21 +68,35 @@
     <div class="sub">自动刷新间隔：5 秒</div>
 
     <div class="section">
-      <h2>来料路径配置（map_path_config）</h2>
-      <div class="cfg-box">
-        <div class="cfg-grid">
-          <input id="cfg_sync_types" type="text" placeholder="SYNC_TYPES，例如 BP" value="BP">
-          <input id="cfg_watch_dir" type="text" placeholder="WATCH_DIR" value="C:\\Users\\Administrator\\Desktop\\nassync\\A\\BP\\WAFER_MAP">
-          <input id="cfg_target_dir" type="text" placeholder="TARGET_DIR" value="C:\\Users\\Administrator\\Desktop\\nassync\\B\\BP\\WAFER_MAP">
-          <label class="cfg-enabled"><input id="cfg_enabled" type="checkbox" checked> 启用</label>
-          <button id="cfg_save_btn" class="btn-primary" type="button">保存配置</button>
-        </div>
-        <div class="hint">说明：ZIP 会从 WATCH_DIR 搬运到 TARGET_DIR，再解析 MAP 并按 SYNC_TYPES 入库。</div>
+      <div class="section-head">
+        <h2>来料路径配置（map_path_config）</h2>
+        <button id="cfg_add_btn" class="btn-primary" type="button">新增配置</button>
       </div>
       <table>
         <thead><tr><th>ID</th><th>SYNC_TYPES</th><th>WATCH_DIR</th><th>TARGET_DIR</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead>
         <tbody id="cfg_tbody"></tbody>
       </table>
+    </div>
+
+    <div id="cfg_add_modal" class="modal-mask">
+      <div class="modal-card">
+        <div id="cfg_add_modal_title" class="modal-title">新增来料路径配置</div>
+        <div class="modal-grid">
+          <input id="add_id" type="hidden" value="">
+          <label for="add_sync_types">SYNC_TYPES</label>
+          <input id="add_sync_types" type="text" placeholder="例如 BP" value="">
+          <label for="add_watch_dir">WATCH_DIR</label>
+          <input id="add_watch_dir" type="text" placeholder="" value="">
+          <label for="add_target_dir">TARGET_DIR</label>
+          <input id="add_target_dir" type="text" placeholder="" value="">
+          <label for="add_enabled">启用状态</label>
+          <label class="cfg-enabled"><input id="add_enabled" type="checkbox" checked> 启用</label>
+        </div>
+        <div class="modal-actions">
+          <button id="cfg_add_cancel_btn" type="button">取消</button>
+          <button id="cfg_add_save_btn" class="btn-primary" type="button">确认新增</button>
+        </div>
+      </div>
     </div>
 
     <div class="grid">
@@ -174,7 +193,10 @@
           <td class="mono">${esc(x.target_dir)}</td>
           <td>${x.enabled ? '<span class="ok">启用</span>' : '<span class="warn">停用</span>'}</td>
           <td>${esc(x.updated_at || '-')}</td>
-          <td><button class="btn-danger" type="button" onclick="removeConfig(${Number(x.id)})">删除</button></td>
+          <td>
+            <button type="button" onclick="editConfig(${Number(x.id)})">编辑</button>
+            <button class="btn-danger" type="button" onclick="removeConfig(${Number(x.id)})">删除</button>
+          </td>
         </tr>
       `).join('');
       if (!state.configs.length) {
@@ -187,25 +209,60 @@
       renderConfigs(data.items || []);
     }
 
-    async function saveConfig() {
-      const sync_types = document.getElementById('cfg_sync_types').value.trim().toUpperCase();
-      const watch_dir = document.getElementById('cfg_watch_dir').value.trim();
-      const target_dir = document.getElementById('cfg_target_dir').value.trim();
-      const enabled = document.getElementById('cfg_enabled').checked;
+    function openAddModal() {
+      clearModalForm();
+      document.getElementById('cfg_add_modal').classList.add('show');
+    }
+
+    function closeAddModal() {
+      document.getElementById('cfg_add_modal').classList.remove('show');
+    }
+
+    async function saveNewConfig() {
+      const id = document.getElementById('add_id').value.trim();
+      const sync_types = document.getElementById('add_sync_types').value.trim().toUpperCase();
+      const watch_dir = document.getElementById('add_watch_dir').value.trim();
+      const target_dir = document.getElementById('add_target_dir').value.trim();
+      const enabled = document.getElementById('add_enabled').checked;
 
       if (!sync_types || !watch_dir || !target_dir) {
         alert('SYNC_TYPES/WATCH_DIR/TARGET_DIR 都不能为空');
         return;
       }
 
-      const payload = { sync_types, watch_dir, target_dir, enabled };
+      const payload = { id: id || null, sync_types, watch_dir, target_dir, enabled };
       const data = await fetchJson('/api/map-path-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
       renderConfigs(data.items || []);
-      alert('保存成功，监听目录已刷新');
+      clearModalForm();
+      closeAddModal();
+      alert(id ? '更新成功，监听目录已刷新' : '新增成功，监听目录已刷新');
+    }
+
+    function editConfig(id) {
+      const item = (state.configs || []).find(x => Number(x.id) === Number(id));
+      if (!item) return;
+      document.getElementById('add_id').value = String(item.id);
+      document.getElementById('add_sync_types').value = item.sync_types || '';
+      document.getElementById('add_watch_dir').value = item.watch_dir || '';
+      document.getElementById('add_target_dir').value = item.target_dir || '';
+      document.getElementById('add_enabled').checked = Boolean(item.enabled);
+      document.getElementById('cfg_add_modal_title').textContent = '编辑来料路径配置';
+      document.getElementById('cfg_add_save_btn').textContent = '确认更新';
+      document.getElementById('cfg_add_modal').classList.add('show');
+    }
+
+    function clearModalForm() {
+      document.getElementById('add_id').value = '';
+      document.getElementById('add_sync_types').value = 'BP';
+      document.getElementById('add_watch_dir').value = 'C:\\\\Users\\\\Administrator\\\\Desktop\\\\nassync\\\\A\\\\BP\\\\WAFER_MAP';
+      document.getElementById('add_target_dir').value = 'C:\\\\Users\\\\Administrator\\\\Desktop\\\\nassync\\\\B\\\\BP\\\\WAFER_MAP';
+      document.getElementById('add_enabled').checked = true;
+      document.getElementById('cfg_add_modal_title').textContent = '新增来料路径配置';
+      document.getElementById('cfg_add_save_btn').textContent = '确认新增';
     }
 
     async function removeConfig(id) {
@@ -296,11 +353,13 @@
       const recordQ = document.getElementById('record_q');
       const recordPageSize = document.getElementById('record_page_size');
 
-      document.getElementById('cfg_save_btn').addEventListener('click', async () => {
+      document.getElementById('cfg_add_btn').addEventListener('click', openAddModal);
+      document.getElementById('cfg_add_cancel_btn').addEventListener('click', closeAddModal);
+      document.getElementById('cfg_add_save_btn').addEventListener('click', async () => {
         try {
-          await saveConfig();
+          await saveNewConfig();
         } catch (e) {
-          alert(e.message || '保存失败');
+          alert(e.message || '新增失败');
         }
       });
 

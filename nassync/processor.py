@@ -225,16 +225,8 @@ class Processor:
         source_zip_path: Path,
         target_zip_path: Path,
         moved_zip: bool,
-        extracted_paths: list[Path],
     ):
         errors = []
-
-        for map_file in extracted_paths:
-            try:
-                if map_file.exists():
-                    map_file.unlink()
-            except Exception as ex:
-                errors.append(f"删除已提取 MAP 失败: {map_file} ({ex})")
 
         if moved_zip:
             try:
@@ -278,15 +270,19 @@ class Processor:
         source_zip_path = path
         target_dir.mkdir(parents=True, exist_ok=True)
         target_zip_path = target_dir / path.name
+        backup_dir = source_zip_path.parent / "BACKUP"
+        backup_zip_path = backup_dir / source_zip_path.name
 
         active_pool = None
         conn = None
         moved_zip = False
-        extracted_paths = []
 
         try:
             active_pool, conn = self.pg.acquire_connection()
             working_zip_path = source_zip_path
+
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(source_zip_path), str(backup_zip_path))
 
             if not self._same_path(source_zip_path, target_zip_path):
                 if target_zip_path.exists():
@@ -295,11 +291,7 @@ class Processor:
                 moved_zip = True
                 working_zip_path = target_zip_path
 
-            lot_wafer_pairs, extracted_paths = self.scan_zip(
-                working_zip_path,
-                target_dir,
-                collect_written_paths=True,
-            )
+            lot_wafer_pairs = self.scan_zip(working_zip_path)
 
             self.pg.insert_records(
                 rec_type,
@@ -311,10 +303,10 @@ class Processor:
             conn.commit()
 
             logger.info(
-                "完成：%s -> %s，MAP 已解压到 %s，入库类型=%s",
+                "完成：%s -> %s，备份=%s，入库类型=%s",
                 source_zip_path,
                 working_zip_path,
-                target_dir,
+                backup_zip_path,
                 rec_type,
             )
             return True
@@ -330,7 +322,6 @@ class Processor:
                     source_zip_path,
                     target_zip_path,
                     moved_zip,
-                    extracted_paths,
                 )
             except Exception as rollback_ex:
                 raise RetryableProcessError(
@@ -342,12 +333,11 @@ class Processor:
             if self.pg is not None and active_pool is not None and conn is not None:
                 self.pg.release_connection(active_pool, conn)
 
-    def scan_zip(self, zip_path, target_dir: Path, collect_written_paths=False):
+    def scan_zip(self, zip_path):
         lot_wafer_pairs = []
-        written_paths = []
         map_name_pattern = re.compile(r"^([A-Za-z0-9]{6})-([A-Za-z0-9]{2})$")
         zip_prefix = Path(zip_path).stem.split("-", 1)[0].upper()
-        map_entries = []
+        has_map = False
 
         with zipfile.ZipFile(zip_path) as z:
             for info in z.infolist():
@@ -379,22 +369,10 @@ class Processor:
                         parts[1] if len(parts) > 1 and parts[1] else "UNKNOWN"
                     ).upper()
 
+                has_map = True
                 lot_wafer_pairs.append((lot_id, wafer_id))
-                map_entries.append((info, f))
 
-            if not map_entries:
+            if not has_map:
                 raise ValueError(f"ZIP 内未找到 MAP 文件：{Path(zip_path).name}")
 
-            target_dir.mkdir(parents=True, exist_ok=True)
-            for info, map_file_name in map_entries:
-                target_map_path = target_dir / map_file_name
-                temp_path = target_map_path.with_suffix(f"{target_map_path.suffix}.tmp")
-                with z.open(info, "r") as src, temp_path.open("wb") as dst:
-                    shutil.copyfileobj(src, dst)
-                temp_path.replace(target_map_path)
-                written_paths.append(target_map_path)
-
-            pairs = sorted(set(lot_wafer_pairs))
-            if collect_written_paths:
-                return pairs, written_paths
-            return pairs
+            return sorted(set(lot_wafer_pairs))

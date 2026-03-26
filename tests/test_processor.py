@@ -1,4 +1,4 @@
-import json
+﻿import json
 import os
 import sys
 import zipfile
@@ -67,24 +67,21 @@ def test_scan_zip_raises_when_no_map(tmp_path: Path):
         zf.writestr("note.txt", "dummy")
 
     with pytest.raises(ValueError, match="未找到 MAP"):
-        p.scan_zip(zip_path, tmp_path / "B" / "BP" / "WAFER_MAP")
+        p.scan_zip(zip_path)
 
 
-def test_scan_zip_extracts_map_and_returns_pairs(tmp_path: Path):
+def test_scan_zip_parse_only_and_returns_pairs(tmp_path: Path):
     p = make_processor(tmp_path)
     zip_path = tmp_path / "A" / "BP" / "WAFER_MAP" / "ABC123.zip"
-    target_dir = tmp_path / "B" / "BP" / "WAFER_MAP"
     zip_path.parent.mkdir(parents=True, exist_ok=True)
 
     with zipfile.ZipFile(zip_path, "w") as zf:
         zf.writestr("nested/ABC123-01.MAP", "MAP-DATA")
 
-    pairs = p.scan_zip(zip_path, target_dir)
+    pairs = p.scan_zip(zip_path)
 
     assert pairs == [("ABC123", "01")]
-    extracted = target_dir / "ABC123-01.MAP"
-    assert extracted.exists() is True
-    assert extracted.read_text(encoding="utf-8") == "MAP-DATA"
+    assert (tmp_path / "B" / "BP" / "WAFER_MAP" / "ABC123-01.MAP").exists() is False
 
 
 class DummyPg:
@@ -240,16 +237,16 @@ def test_process_moves_zip_and_uses_type_from_map_path_config(tmp_path: Path):
     assert zip_path.exists() is False
     moved_zip = target_dir / "ABC123.zip"
     assert moved_zip.exists() is True
-    extracted = target_dir / "ABC123-01.MAP"
-    assert extracted.exists() is True
-    assert extracted.read_text(encoding="utf-8") == "MAP-DATA"
+    assert (target_dir / "ABC123-01.MAP").exists() is False
+    backup_zip = watch_dir / "BACKUP" / "ABC123.zip"
+    assert backup_zip.exists() is True
     assert pg.insert_calls[0]["rec_type"] == "BP_FROM_DB"
     assert pg.insert_calls[0]["conn_is_same"] is True
     assert pg.conn.commits == 1
     assert pg.conn.rollbacks == 0
 
 
-def test_process_rolls_back_move_and_map_when_insert_failed(tmp_path: Path):
+def test_process_rolls_back_move_when_insert_failed(tmp_path: Path):
     watch_dir = tmp_path / "A" / "BP" / "WAFER_MAP"
     target_dir = tmp_path / "B" / "BP" / "WAFER_MAP"
     watch_dir.mkdir(parents=True, exist_ok=True)
@@ -280,5 +277,6 @@ def test_process_rolls_back_move_and_map_when_insert_failed(tmp_path: Path):
     assert zip_path.exists() is True
     assert (target_dir / "ABC123.zip").exists() is False
     assert (target_dir / "ABC123-01.MAP").exists() is False
+    assert (watch_dir / "BACKUP" / "ABC123.zip").exists() is True
     assert pg.conn.commits == 0
     assert pg.conn.rollbacks == 1

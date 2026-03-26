@@ -184,6 +184,7 @@ def create_dashboard_handler(pg: PgClient, lifecycle: ServiceLifecycle, cfg: Con
                 watch_dir_raw = payload.get("watch_dir")
                 target_dir_raw = payload.get("target_dir")
                 enabled = payload.get("enabled", True)
+                config_id = payload.get("id")
 
                 if not sync_types:
                     self._send_json(
@@ -203,12 +204,21 @@ def create_dashboard_handler(pg: PgClient, lifecycle: ServiceLifecycle, cfg: Con
                     return
 
                 try:
-                    pg.upsert_map_path_config(
-                        sync_types=sync_types,
-                        watch_dir=str(watch_dir),
-                        target_dir=str(target_dir),
-                        enabled=bool(enabled),
-                    )
+                    if config_id in (None, ""):
+                        pg.create_map_path_config(
+                            sync_types=sync_types,
+                            watch_dir=str(watch_dir),
+                            target_dir=str(target_dir),
+                            enabled=bool(enabled),
+                        )
+                    else:
+                        pg.update_map_path_config(
+                            config_id=int(config_id),
+                            sync_types=sync_types,
+                            watch_dir=str(watch_dir),
+                            target_dir=str(target_dir),
+                            enabled=bool(enabled),
+                        )
                     lifecycle.request_reload()
                     rows = pg.get_map_path_configs(only_enabled=False)
                 except Exception as ex:

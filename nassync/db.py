@@ -327,7 +327,7 @@ class PgClient:
     def get_map_path_configs(self, only_enabled=False):
         return self._get_map_path_configs_cached(only_enabled=only_enabled)
 
-    def upsert_map_path_config(self, sync_types, watch_dir, target_dir, enabled=True):
+    def create_map_path_config(self, sync_types, watch_dir, target_dir, enabled=True):
         normalized_sync_types = self._normalize_sync_type(sync_types)
         if not normalized_sync_types:
             raise ValueError("SYNC_TYPES 不能为空")
@@ -346,11 +346,6 @@ class PgClient:
                     INSERT INTO {self.MAP_PATH_TABLE}
                     (sync_types, watch_dir, target_dir, enabled, updated_at)
                     VALUES (%s, %s, %s, %s, NOW())
-                    ON CONFLICT (watch_dir) DO UPDATE SET
-                      sync_types = EXCLUDED.sync_types,
-                      target_dir = EXCLUDED.target_dir,
-                      enabled = EXCLUDED.enabled,
-                      updated_at = NOW()
                     """,
                     (
                         normalized_sync_types,
@@ -371,6 +366,69 @@ class PgClient:
             raise
         finally:
             self._release_conn(active_pool, conn)
+
+    def update_map_path_config(
+        self, config_id, sync_types, watch_dir, target_dir, enabled=True
+    ):
+        normalized_sync_types = self._normalize_sync_type(sync_types)
+        if not normalized_sync_types:
+            raise ValueError("SYNC_TYPES 不能为空")
+
+        normalized_watch = str(Path(watch_dir))
+        normalized_target = str(Path(target_dir))
+
+        active_pool = None
+        conn = None
+        try:
+            self._ensure_map_path_config_table()
+            active_pool, conn = self._acquire_conn()
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    UPDATE {self.MAP_PATH_TABLE}
+                    SET sync_types = %s,
+                        watch_dir = %s,
+                        target_dir = %s,
+                        enabled = %s,
+                        updated_at = NOW()
+                    WHERE id = %s
+                    """,
+                    (
+                        normalized_sync_types,
+                        normalized_watch,
+                        normalized_target,
+                        bool(enabled),
+                        int(config_id),
+                    ),
+                )
+                if cur.rowcount == 0:
+                    raise ValueError(f"配置不存在：id={config_id}")
+            conn.commit()
+            self._invalidate_map_path_cache()
+        except Exception as ex:
+            if conn is not None:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+            self._handle_db_exception(ex)
+            raise
+        finally:
+            self._release_conn(active_pool, conn)
+
+    def upsert_map_path_config(self, sync_types, watch_dir, target_dir, enabled=True):
+        # 兼容旧调用：按 watch_dir 幂等写入
+        normalized_watch = str(Path(watch_dir))
+        exists = None
+        for row in self.get_map_path_configs(only_enabled=False):
+            if str(Path(row.get("watch_dir") or "")) == normalized_watch:
+                exists = row
+                break
+        if exists:
+            return self.update_map_path_config(
+                exists["id"], sync_types, watch_dir, target_dir, enabled
+            )
+        return self.create_map_path_config(sync_types, watch_dir, target_dir, enabled)
 
     def delete_map_path_config(self, config_id):
         active_pool = None
