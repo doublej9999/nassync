@@ -42,7 +42,7 @@
     .toolbar input, .toolbar select { border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font-size: 13px; background: #fff; }
     .toolbar button { border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 13px; background: #fff; cursor: pointer; }
     .toolbar button:disabled { color: #9ca3af; cursor: not-allowed; }
-    .scope-switch { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+    .scope-switch { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-bottom: 12px; }
     .scope-note { color: var(--muted); font-size: 12px; }
     .pager { color: var(--muted); font-size: 12px; }
     h2 { font-size: 16px; margin: 0 0 12px; }
@@ -115,8 +115,8 @@
         <div class="toolbar">
           <input id="task_q" type="text" placeholder="搜索类型/压缩包/状态/错误信息/路径">
           <select id="task_page_size">
-            <option value="10">10 条/页</option>
-            <option value="20" selected>20 条/页</option>
+            <option value="10" selected>10 条/页</option>
+            <option value="20">20 条/页</option>
             <option value="50">50 条/页</option>
           </select>
           <button id="task_search_btn" type="button">搜索</button>
@@ -135,8 +135,8 @@
         <div class="toolbar">
           <input id="record_q" type="text" placeholder="搜索类型/LOT/WAFER/来源压缩包">
           <select id="record_page_size">
-            <option value="10">10 条/页</option>
-            <option value="20" selected>20 条/页</option>
+            <option value="10" selected>10 条/页</option>
+            <option value="20">20 条/页</option>
             <option value="50">50 条/页</option>
           </select>
           <button id="record_search_btn" type="button">搜索</button>
@@ -196,8 +196,8 @@
 
   <script>
     const state = {
-      task: { page: 1, page_size: 20, q: '' },
-      record: { page: 1, page_size: 20, q: '' },
+      task: { page: 1, page_size: 10, q: '' },
+      record: { page: 1, page_size: 10, q: '' },
       configs: [],
       currentPage: 'stats',
       statsScope: 'normal',
@@ -420,7 +420,7 @@
 
       document.getElementById('task_search_btn').addEventListener('click', () => {
         state.task.q = taskQ.value.trim();
-        state.task.page_size = Number(taskPageSize.value) || 20;
+        state.task.page_size = Number(taskPageSize.value) || 10;
         state.task.page = 1;
         tick();
       });
@@ -428,7 +428,7 @@
         if (e.key === 'Enter') document.getElementById('task_search_btn').click();
       });
       taskPageSize.addEventListener('change', () => {
-        state.task.page_size = Number(taskPageSize.value) || 20;
+        state.task.page_size = Number(taskPageSize.value) || 10;
         state.task.page = 1;
         tick();
       });
@@ -445,7 +445,7 @@
 
       document.getElementById('record_search_btn').addEventListener('click', () => {
         state.record.q = recordQ.value.trim();
-        state.record.page_size = Number(recordPageSize.value) || 20;
+        state.record.page_size = Number(recordPageSize.value) || 10;
         state.record.page = 1;
         tick();
       });
@@ -453,7 +453,7 @@
         if (e.key === 'Enter') document.getElementById('record_search_btn').click();
       });
       recordPageSize.addEventListener('change', () => {
-        state.record.page_size = Number(recordPageSize.value) || 20;
+        state.record.page_size = Number(recordPageSize.value) || 10;
         state.record.page = 1;
         tick();
       });

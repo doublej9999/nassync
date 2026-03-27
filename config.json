@@ -16,6 +16,6 @@
   "CHECK_MAP_FILENAME_FORMAT": false,
   "INITIAL_SCAN": true,
   "WEB_HOST": "0.0.0.0",
-  "WEB_PORT": 8080
+  "WEB_PORT": 8081
 }
 
