@@ -42,6 +42,8 @@
     .toolbar input, .toolbar select { border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font-size: 13px; background: #fff; }
     .toolbar button { border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 13px; background: #fff; cursor: pointer; }
     .toolbar button:disabled { color: #9ca3af; cursor: not-allowed; }
+    .scope-switch { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+    .scope-note { color: var(--muted); font-size: 12px; }
     .pager { color: var(--muted); font-size: 12px; }
     h2 { font-size: 16px; margin: 0 0 12px; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -52,6 +54,9 @@
     .status.SUCCESS { background: var(--ok); }
     .status.PENDING { background: var(--warn); }
     .status.FAILED { background: var(--err); }
+    .pill { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; }
+    .pill.feedback { background: #fef3c7; color: #92400e; }
+    .pill.normal { background: #dcfce7; color: #166534; }
     .meta { margin-top: 12px; color: var(--muted); font-size: 12px; display: flex; justify-content: space-between; }
     .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
     .btn-danger { color: var(--err); }
@@ -85,6 +90,10 @@
   <div class="wrap content">
     <div id="page_stats" class="page">
       <div class="sub">自动刷新间隔：5 秒</div>
+      <div class="scope-switch">
+        <button id="stats_scope_toggle_btn" type="button" class="btn-primary">切换到回传统计</button>
+        <span id="stats_scope_text" class="scope-note">当前统计：非回传</span>
+      </div>
       <div class="grid">
         <div class="card"><div class="label">任务总数</div><div id="total_tasks" class="value">-</div></div>
         <div class="card"><div class="label">处理中</div><div id="pending_tasks" class="value warn">-</div></div>
@@ -116,7 +125,7 @@
           <span id="task_pager" class="pager">第 -/- 页，共 0 条</span>
         </div>
         <table>
-          <thead><tr><th>时间</th><th>类型</th><th>压缩包</th><th>状态</th><th>错误信息</th></tr></thead>
+          <thead><tr><th>时间</th><th>类型</th><th>压缩包</th><th>是否回传</th><th>状态</th><th>错误信息</th></tr></thead>
           <tbody id="task_tbody"></tbody>
         </table>
       </div>
@@ -191,8 +200,19 @@
       record: { page: 1, page_size: 20, q: '' },
       configs: [],
       currentPage: 'stats',
+      statsScope: 'normal',
       refreshTimer: null,
     };
+
+    function getScopeText(scope) {
+      return scope === 'feedback' ? '回传' : '非回传';
+    }
+
+    function updateScopeUI() {
+      const isFeedback = state.statsScope === 'feedback';
+      document.getElementById('stats_scope_text').textContent = `当前统计：${getScopeText(state.statsScope)}`;
+      document.getElementById('stats_scope_toggle_btn').textContent = isFeedback ? '切换到非回传统计' : '切换到回传统计';
+    }
 
     function esc(v) {
       if (v === null || v === undefined) return '';
@@ -310,11 +330,14 @@
         task_page: String(state.task.page),
         task_page_size: String(state.task.page_size),
         task_q: state.task.q,
+        stats_scope: state.statsScope,
         record_page: String(state.record.page),
         record_page_size: String(state.record.page_size),
         record_q: state.record.q,
       });
       const data = await fetchJson('/api/dashboard?' + params.toString());
+      state.statsScope = data.scope === 'feedback' ? 'feedback' : 'normal';
+      updateScopeUI();
       const s = data.summary || {};
 
       document.getElementById('total_tasks').textContent = s.total_tasks ?? 0;
@@ -338,6 +361,7 @@
           <td>${esc(x.updated_at || '-')}</td>
           <td>${esc(x.type)}</td>
           <td class="mono">${esc(x.zip_name)}</td>
+          <td>${x.is_feedback ? '<span class="pill feedback">回传</span>' : '<span class="pill normal">非回传</span>'}</td>
           <td><span class="status ${esc(x.status)}">${esc(x.status)}</span></td>
           <td>${esc(x.error_msg || '-')}</td>
         </tr>
@@ -443,6 +467,14 @@
         state.record.page += 1;
         tick();
       });
+
+      document.getElementById('stats_scope_toggle_btn').addEventListener('click', () => {
+        state.statsScope = state.statsScope === 'feedback' ? 'normal' : 'feedback';
+        state.task.page = 1;
+        state.record.page = 1;
+        updateScopeUI();
+        tick();
+      });
     }
 
     function stopAutoRefresh() {
@@ -494,6 +526,7 @@
 
     bindToolbar();
     bindNav();
+    updateScopeUI();
     switchPage((window.location.hash || '').replace('#', ''), false);
   </script>
 </body>

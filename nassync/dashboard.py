@@ -98,6 +98,7 @@ def create_dashboard_handler(pg: PgClient, lifecycle: ServiceLifecycle, cfg: Con
                         1, min(int((qs.get("task_page_size") or ["20"])[0]), 100)
                     )
                     task_q = (qs.get("task_q") or [""])[0]
+                    stats_scope = (qs.get("stats_scope") or ["normal"])[0]
 
                     record_page = max(1, int((qs.get("record_page") or ["1"])[0]))
                     record_page_size = max(
@@ -115,6 +116,7 @@ def create_dashboard_handler(pg: PgClient, lifecycle: ServiceLifecycle, cfg: Con
                     task_page,
                     task_page_size,
                     task_q,
+                    stats_scope,
                     record_page,
                     record_page_size,
                     record_q,
@@ -131,12 +133,18 @@ def create_dashboard_handler(pg: PgClient, lifecycle: ServiceLifecycle, cfg: Con
                         return
 
                 try:
-                    data = pg.get_dashboard_metrics()
+                    data = pg.get_dashboard_metrics(scope=stats_scope)
                     data["recent_tasks"] = pg.get_recent_tasks(
-                        page=task_page, page_size=task_page_size, keyword=task_q
+                        page=task_page,
+                        page_size=task_page_size,
+                        keyword=task_q,
+                        scope=stats_scope,
                     )
                     data["recent_records"] = pg.get_recent_records(
-                        page=record_page, page_size=record_page_size, keyword=record_q
+                        page=record_page,
+                        page_size=record_page_size,
+                        keyword=record_q,
+                        scope=stats_scope,
                     )
                 except Exception as ex:
                     logger.warning("查询看板数据失败：%s", ex)

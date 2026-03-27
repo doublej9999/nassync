@@ -274,6 +274,42 @@ class PgClient:
     def _normalize_sync_type(sync_types: str) -> str:
         return (sync_types or "").strip().upper()
 
+    @staticmethod
+    def _normalize_stats_scope(scope) -> str:
+        value = str(scope or "all").strip().lower()
+        if value in {"feedback", "normal", "all"}:
+            return value
+        return "all"
+
+    def _feedback_match_condition(self, alias: str) -> str:
+        return f"""
+        EXISTS (
+          SELECT 1
+          FROM {self.MAP_PATH_TABLE} m
+          WHERE m.is_feedback = TRUE
+            AND (
+              LOWER({alias}.zip_path) = LOWER(m.watch_dir)
+              OR (
+                POSITION(LOWER(m.watch_dir) IN LOWER({alias}.zip_path)) = 1
+                AND SUBSTRING(
+                  {alias}.zip_path
+                  FROM CHAR_LENGTH(m.watch_dir) + 1
+                  FOR 1
+                ) IN ('\\', '/')
+              )
+            )
+        )
+        """
+
+    def _scope_where_sql(self, scope: str, alias: str) -> str:
+        normalized = self._normalize_stats_scope(scope)
+        feedback_match = self._feedback_match_condition(alias)
+        if normalized == "feedback":
+            return f"WHERE {feedback_match}"
+        if normalized == "normal":
+            return f"WHERE NOT ({feedback_match})"
+        return ""
+
     def _invalidate_map_path_cache(self):
         with self._map_cache_lock:
             self._map_config_cache = []
@@ -552,12 +588,14 @@ class PgClient:
             default_target,
         )
 
-    def get_dashboard_metrics(self):
+    def get_dashboard_metrics(self, scope="all"):
+        scope = self._normalize_stats_scope(scope)
         active_pool = None
         conn = None
         try:
             active_pool, conn = self._acquire_conn()
             with conn.cursor() as cur:
+                task_scope_where = self._scope_where_sql(scope, "t")
                 cur.execute(
                     f"""
                     SELECT
@@ -565,12 +603,20 @@ class PgClient:
                       COUNT(*) FILTER (WHERE status='PENDING') AS pending_tasks,
                       COUNT(*) FILTER (WHERE status='SUCCESS') AS success_tasks,
                       COUNT(*) FILTER (WHERE status='FAILED') AS failed_tasks
-                    FROM {self.cfg.DB_TASK_TABLE}
+                    FROM {self.cfg.DB_TASK_TABLE} t
+                    {task_scope_where}
                     """
                 )
                 total_tasks, pending_tasks, success_tasks, failed_tasks = cur.fetchone()
 
-                cur.execute(f"SELECT COUNT(*) FROM {self.cfg.DB_TABLE}")
+                record_scope_where = self._scope_where_sql(scope, "r")
+                cur.execute(
+                    f"""
+                    SELECT COUNT(*)
+                    FROM {self.cfg.DB_TABLE} r
+                    {record_scope_where}
+                    """
+                )
                 (total_records,) = cur.fetchone()
 
                 cur.execute(
@@ -578,7 +624,8 @@ class PgClient:
                     SELECT type,
                            COUNT(*) AS task_count,
                            MAX(updated_at) AS last_update
-                    FROM {self.cfg.DB_TASK_TABLE}
+                    FROM {self.cfg.DB_TASK_TABLE} t
+                    {task_scope_where}
                     GROUP BY type
                     ORDER BY type
                     """
@@ -600,10 +647,17 @@ class PgClient:
                     "pending_tasks": pending_tasks or 0,
                     "success_tasks": success_tasks or 0,
                     "failed_tasks": failed_tasks or 0,
+                    "feedback_tasks": (total_tasks or 0)
+                    if scope == "feedback"
+                    else 0,
+                    "normal_tasks": (total_tasks or 0)
+                    if scope == "normal"
+                    else 0,
                     "total_records": total_records or 0,
                 },
                 "by_type": by_type,
                 "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "scope": scope,
             }
         except Exception as ex:
             self._handle_db_exception(ex)
@@ -611,58 +665,60 @@ class PgClient:
         finally:
             self._release_conn(active_pool, conn)
 
-    def get_recent_tasks(self, page=1, page_size=20, keyword=""):
+    def get_recent_tasks(self, page=1, page_size=20, keyword="", scope="all"):
         page = max(1, int(page or 1))
         page_size = max(1, min(int(page_size or 20), 100))
         offset = (page - 1) * page_size
         kw = (keyword or "").strip()
+        scope = self._normalize_stats_scope(scope)
 
         active_pool = None
         conn = None
         try:
             active_pool, conn = self._acquire_conn()
             with conn.cursor() as cur:
+                where_parts = []
+                params = []
                 if kw:
                     like_kw = f"%{kw}%"
-                    where_sql = """
-                    WHERE type ILIKE %s
-                       OR zip_name ILIKE %s
-                       OR status ILIKE %s
-                       OR COALESCE(error_msg, '') ILIKE %s
-                       OR zip_path ILIKE %s
-                    """
-                    params = (like_kw, like_kw, like_kw, like_kw, like_kw)
-                    cur.execute(
-                        f"""
-                        SELECT COUNT(*)
-                        FROM {self.cfg.DB_TASK_TABLE}
-                        {where_sql}
-                        """,
-                        params,
+                    where_parts.append(
+                        "(t.type ILIKE %s OR t.zip_name ILIKE %s OR t.status ILIKE %s OR COALESCE(t.error_msg, '') ILIKE %s OR t.zip_path ILIKE %s)"
                     )
-                    (total,) = cur.fetchone()
-                    cur.execute(
-                        f"""
-                        SELECT type, zip_name, status, error_msg, zip_path, updated_at
-                        FROM {self.cfg.DB_TASK_TABLE}
-                        {where_sql}
-                        ORDER BY updated_at DESC
-                        LIMIT %s OFFSET %s
-                        """,
-                        params + (page_size, offset),
-                    )
-                else:
-                    cur.execute(f"SELECT COUNT(*) FROM {self.cfg.DB_TASK_TABLE}")
-                    (total,) = cur.fetchone()
-                    cur.execute(
-                        f"""
-                        SELECT type, zip_name, status, error_msg, zip_path, updated_at
-                        FROM {self.cfg.DB_TASK_TABLE}
-                        ORDER BY updated_at DESC
-                        LIMIT %s OFFSET %s
-                        """,
-                        (page_size, offset),
-                    )
+                    params.extend([like_kw, like_kw, like_kw, like_kw, like_kw])
+                scope_where = self._scope_where_sql(scope, "t")
+                if scope_where:
+                    where_parts.append(scope_where.replace("WHERE ", "", 1).strip())
+                where_sql = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
+                base_params = tuple(params)
+
+                cur.execute(
+                    f"""
+                    SELECT COUNT(*)
+                    FROM {self.cfg.DB_TASK_TABLE} t
+                    {where_sql}
+                    """,
+                    base_params,
+                )
+                (total,) = cur.fetchone()
+
+                feedback_match = self._feedback_match_condition("t")
+                cur.execute(
+                    f"""
+                    SELECT
+                      t.type,
+                      t.zip_name,
+                      t.status,
+                      t.error_msg,
+                      t.zip_path,
+                      t.updated_at,
+                      {feedback_match} AS is_feedback
+                    FROM {self.cfg.DB_TASK_TABLE} t
+                    {where_sql}
+                    ORDER BY t.updated_at DESC
+                    LIMIT %s OFFSET %s
+                    """,
+                    base_params + (page_size, offset),
+                )
                 rows = cur.fetchall()
             items = [
                 {
@@ -672,6 +728,82 @@ class PgClient:
                     "error_msg": row[3],
                     "zip_path": row[4],
                     "updated_at": row[5].strftime("%Y-%m-%d %H:%M:%S")
+                    if row[5]
+                    else None,
+                    "is_feedback": bool(row[6]),
+                }
+                for row in rows
+            ]
+            total_pages = max(1, (total + page_size - 1) // page_size) if total else 1
+            return {
+                "items": items,
+                "page": page,
+                "page_size": page_size,
+                "total": total or 0,
+                "total_pages": total_pages,
+                "q": kw,
+                "scope": scope,
+            }
+        except Exception as ex:
+            self._handle_db_exception(ex)
+            raise
+        finally:
+            self._release_conn(active_pool, conn)
+
+    def get_recent_records(self, page=1, page_size=20, keyword="", scope="all"):
+        page = max(1, int(page or 1))
+        page_size = max(1, min(int(page_size or 20), 100))
+        offset = (page - 1) * page_size
+        kw = (keyword or "").strip()
+        scope = self._normalize_stats_scope(scope)
+
+        active_pool = None
+        conn = None
+        try:
+            active_pool, conn = self._acquire_conn()
+            with conn.cursor() as cur:
+                where_parts = []
+                params = []
+                if kw:
+                    like_kw = f"%{kw}%"
+                    where_parts.append(
+                        "(r.type ILIKE %s OR r.lot_id ILIKE %s OR r.wafer_id ILIKE %s OR r.zip_name ILIKE %s OR r.zip_path ILIKE %s)"
+                    )
+                    params.extend([like_kw, like_kw, like_kw, like_kw, like_kw])
+                scope_where = self._scope_where_sql(scope, "r")
+                if scope_where:
+                    where_parts.append(scope_where.replace("WHERE ", "", 1).strip())
+                where_sql = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
+                base_params = tuple(params)
+
+                cur.execute(
+                    f"""
+                    SELECT COUNT(*)
+                    FROM {self.cfg.DB_TABLE} r
+                    {where_sql}
+                    """,
+                    base_params,
+                )
+                (total,) = cur.fetchone()
+                cur.execute(
+                    f"""
+                    SELECT r.type, r.lot_id, r.wafer_id, r.zip_name, r.zip_path, r.created_at
+                    FROM {self.cfg.DB_TABLE} r
+                    {where_sql}
+                    ORDER BY r.created_at DESC
+                    LIMIT %s OFFSET %s
+                    """,
+                    base_params + (page_size, offset),
+                )
+                rows = cur.fetchall()
+            items = [
+                {
+                    "type": row[0],
+                    "lot_id": row[1],
+                    "wafer_id": row[2],
+                    "zip_name": row[3],
+                    "zip_path": row[4],
+                    "created_at": row[5].strftime("%Y-%m-%d %H:%M:%S")
                     if row[5]
                     else None,
                 }
@@ -685,85 +817,7 @@ class PgClient:
                 "total": total or 0,
                 "total_pages": total_pages,
                 "q": kw,
-            }
-        except Exception as ex:
-            self._handle_db_exception(ex)
-            raise
-        finally:
-            self._release_conn(active_pool, conn)
-
-    def get_recent_records(self, page=1, page_size=20, keyword=""):
-        page = max(1, int(page or 1))
-        page_size = max(1, min(int(page_size or 20), 100))
-        offset = (page - 1) * page_size
-        kw = (keyword or "").strip()
-
-        active_pool = None
-        conn = None
-        try:
-            active_pool, conn = self._acquire_conn()
-            with conn.cursor() as cur:
-                if kw:
-                    like_kw = f"%{kw}%"
-                    where_sql = """
-                    WHERE type ILIKE %s
-                       OR lot_id ILIKE %s
-                       OR wafer_id ILIKE %s
-                       OR zip_name ILIKE %s
-                    """
-                    params = (like_kw, like_kw, like_kw, like_kw)
-                    cur.execute(
-                        f"""
-                        SELECT COUNT(*)
-                        FROM {self.cfg.DB_TABLE}
-                        {where_sql}
-                        """,
-                        params,
-                    )
-                    (total,) = cur.fetchone()
-                    cur.execute(
-                        f"""
-                        SELECT type, lot_id, wafer_id, zip_name, created_at
-                        FROM {self.cfg.DB_TABLE}
-                        {where_sql}
-                        ORDER BY created_at DESC
-                        LIMIT %s OFFSET %s
-                        """,
-                        params + (page_size, offset),
-                    )
-                else:
-                    cur.execute(f"SELECT COUNT(*) FROM {self.cfg.DB_TABLE}")
-                    (total,) = cur.fetchone()
-                    cur.execute(
-                        f"""
-                        SELECT type, lot_id, wafer_id, zip_name, created_at
-                        FROM {self.cfg.DB_TABLE}
-                        ORDER BY created_at DESC
-                        LIMIT %s OFFSET %s
-                        """,
-                        (page_size, offset),
-                    )
-                rows = cur.fetchall()
-            items = [
-                {
-                    "type": row[0],
-                    "lot_id": row[1],
-                    "wafer_id": row[2],
-                    "zip_name": row[3],
-                    "created_at": row[4].strftime("%Y-%m-%d %H:%M:%S")
-                    if row[4]
-                    else None,
-                }
-                for row in rows
-            ]
-            total_pages = max(1, (total + page_size - 1) // page_size) if total else 1
-            return {
-                "items": items,
-                "page": page,
-                "page_size": page_size,
-                "total": total or 0,
-                "total_pages": total_pages,
-                "q": kw,
+                "scope": scope,
             }
         except Exception as ex:
             self._handle_db_exception(ex)
