@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS zip_task_status (
     zip_path VARCHAR(1000) NOT NULL,
     status VARCHAR(20) NOT NULL,
     error_msg VARCHAR(1000),
+    is_feedback BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
     CONSTRAINT ck_zip_task_status_status CHECK (status IN ('PENDING', 'SUCCESS', 'FAILED')),
@@ -35,6 +36,12 @@ ON zip_task_status (updated_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_zip_task_status_type
 ON zip_task_status (type, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_zip_task_status_is_feedback
+ON zip_task_status (is_feedback, updated_at DESC);
+
+ALTER TABLE zip_task_status
+ADD COLUMN IF NOT EXISTS is_feedback BOOLEAN NOT NULL DEFAULT FALSE;
 
 CREATE TABLE IF NOT EXISTS map_path_config (
     id BIGSERIAL PRIMARY KEY,

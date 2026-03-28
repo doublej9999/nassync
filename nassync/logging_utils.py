@@ -9,7 +9,7 @@ def setup_logging(cfg: Config) -> logging.Logger:
     logger.setLevel(logging.INFO)
     logger.handlers.clear()
 
-    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] [%(threadName)s] %(message)s")
 
     ch = logging.StreamHandler()
     ch.setFormatter(fmt)

@@ -1,4 +1,4 @@
-﻿import errno
+import errno
 import logging
 import os
 import re
@@ -17,6 +17,8 @@ logger = logging.getLogger("watcher")
 
 
 class Processor:
+    _MAP_NAME_PATTERN = re.compile(r"^([A-Za-z0-9]{6})-([A-Za-z0-9]{2})$")
+
     def __init__(self, cfg: Config, pg):
         self.cfg = cfg
         self.pg = pg
@@ -81,7 +83,8 @@ class Processor:
         for _ in range(max_checks):
             if not path.exists():
                 return False
-            stat = (path.stat().st_size, path.stat().st_mtime)
+            s = path.stat()
+            stat = (s.st_size, s.st_mtime)
             if stat == last:
                 count += 1
                 if count >= self.cfg.FILE_STABLE_CHECK_TIMES:
@@ -99,6 +102,7 @@ class Processor:
             return None
 
         rec_type = route["rec_type"]
+        is_feedback = bool(route.get("is_feedback"))
         key = str(path)
         with self.lock:
             if key in self.processing:
@@ -115,9 +119,9 @@ class Processor:
 
             for attempt in range(max_attempts):
                 try:
-                    self.pg.upsert_task_status(rec_type, path.name, str(path), "PENDING")
+                    self.pg.upsert_task_status(rec_type, path.name, str(path), "PENDING", is_feedback=is_feedback)
                     self._process(path)
-                    self.pg.upsert_task_status(rec_type, path.name, str(path), "SUCCESS")
+                    self.pg.upsert_task_status(rec_type, path.name, str(path), "SUCCESS", is_feedback=is_feedback)
                     return None
                 except Exception as ex:
                     last_error = ex
@@ -159,7 +163,7 @@ class Processor:
                 if last_error
                 else "处理失败（未知错误）"
             )
-            self._mark_failed(rec_type, path, failure_reason)
+            self._mark_failed(rec_type, path, failure_reason, is_feedback=is_feedback)
             return None
         except Exception as ex:
             logger.exception("处理失败：%s, err=%s", path, ex)
@@ -173,18 +177,18 @@ class Processor:
                 )
                 return deferred_delay
 
-            self._mark_failed(rec_type, path, f"{type(ex).__name__}: {ex}")
+            self._mark_failed(rec_type, path, f"{type(ex).__name__}: {ex}", is_feedback=is_feedback)
             return None
         finally:
             with self.lock:
                 self.processing.discard(key)
 
-    def _mark_failed(self, rec_type: str, path: Path, reason: str):
+    def _mark_failed(self, rec_type: str, path: Path, reason: str, is_feedback: bool = False):
         if self.pg is None:
             logger.warning("数据库客户端不可用，FAILED 状态未写入：%s, err=%s", path, reason)
             return
         try:
-            self.pg.upsert_task_status(rec_type, path.name, str(path), "FAILED", reason)
+            self.pg.upsert_task_status(rec_type, path.name, str(path), "FAILED", reason, is_feedback=is_feedback)
         except Exception:
             logger.exception("写入 FAILED 状态失败：%s", path)
 
@@ -342,7 +346,7 @@ class Processor:
 
     def scan_zip(self, zip_path):
         lot_wafer_pairs = []
-        map_name_pattern = re.compile(r"^([A-Za-z0-9]{6})-([A-Za-z0-9]{2})$")
+        map_name_pattern = self._MAP_NAME_PATTERN
         zip_prefix = Path(zip_path).stem.split("-", 1)[0].upper()
         has_map = False
 

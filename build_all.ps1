@@ -94,6 +94,8 @@ if [ -f config.example.json ]; then
   cp -f config.example.json dist/linux/config.json
 fi
 '@
+    # 避免 Windows CRLF 传入 bash 导致 `pipefail\r` 报错
+    $linuxBuildCommand = $linuxBuildCommand -replace "`r", ""
 
     Run-External "Docker Linux build" "docker" @("run", "--rm", "-v", $mountPath, "-w", $dockerWorkdir, $LinuxImage, "bash", "-lc", $linuxBuildCommand)
 }

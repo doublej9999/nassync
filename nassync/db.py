@@ -1,11 +1,13 @@
-﻿import logging
+import logging
 import os
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 from psycopg2 import InterfaceError, OperationalError
 from psycopg2 import pool
+from psycopg2.extras import execute_values
 
 from .config import Config
 from .errors import summarize_error_msg
@@ -132,6 +134,35 @@ class PgClient:
         if self._is_connection_error(ex):
             self._reset_pool()
 
+    @contextmanager
+    def _transaction(self):
+        """获取连接并自动 commit/rollback/release 的上下文管理器。"""
+        active_pool, conn = self._acquire_conn()
+        try:
+            yield conn
+            conn.commit()
+        except Exception as ex:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            self._handle_db_exception(ex)
+            raise
+        finally:
+            self._release_conn(active_pool, conn)
+
+    @contextmanager
+    def _readonly(self):
+        """获取只读连接的上下文管理器（不 commit）。"""
+        active_pool, conn = self._acquire_conn()
+        try:
+            yield conn
+        except Exception as ex:
+            self._handle_db_exception(ex)
+            raise
+        finally:
+            self._release_conn(active_pool, conn)
+
     def acquire_connection(self):
         return self._acquire_conn()
 
@@ -142,7 +173,7 @@ class PgClient:
         sql = f"""
         INSERT INTO {self.cfg.DB_TABLE}
         (type, lot_id, wafer_id, zip_name, zip_path)
-        VALUES (%s,%s,%s,%s,%s)
+        VALUES %s
         ON CONFLICT (type, lot_id, wafer_id) DO UPDATE SET
           created_at = NOW(),
           zip_name = EXCLUDED.zip_name,
@@ -152,7 +183,7 @@ class PgClient:
             (rec_type, lot_id, wafer_id, zip_name, zip_path)
             for lot_id, wafer_id in lot_wafer_pairs
         ]
-        cur.executemany(sql, data)
+        execute_values(cur, sql, data)
 
     def insert_records(self, rec_type, lot_wafer_pairs, zip_name, zip_path, conn=None):
         if conn is not None:
@@ -162,56 +193,29 @@ class PgClient:
                 )
             return
 
-        active_pool = None
-        owned_conn = None
-        try:
-            active_pool, owned_conn = self._acquire_conn()
+        with self._transaction() as owned_conn:
             with owned_conn.cursor() as cur:
                 self._insert_records_with_cursor(
                     cur, rec_type, lot_wafer_pairs, zip_name, zip_path
                 )
-            owned_conn.commit()
-        except Exception as ex:
-            if owned_conn is not None:
-                try:
-                    owned_conn.rollback()
-                except Exception:
-                    pass
-            self._handle_db_exception(ex)
-            raise
-        finally:
-            self._release_conn(active_pool, owned_conn)
 
-    def upsert_task_status(self, rec_type, zip_name, zip_path, status, error_msg=None):
-        active_pool = None
-        conn = None
-        try:
-            active_pool, conn = self._acquire_conn()
-            major_error = summarize_error_msg(error_msg, max_len=200)
+    def upsert_task_status(self, rec_type, zip_name, zip_path, status, error_msg=None, is_feedback=False):
+        major_error = summarize_error_msg(error_msg, max_len=200)
+        with self._transaction() as conn:
             with conn.cursor() as cur:
                 sql = f"""
                 INSERT INTO {self.cfg.DB_TASK_TABLE}
-                (type, zip_name, zip_path, status, error_msg, updated_at)
-                VALUES (%s,%s,%s,%s,%s,NOW())
+                (type, zip_name, zip_path, status, error_msg, is_feedback, updated_at)
+                VALUES (%s,%s,%s,%s,%s,%s,NOW())
                 ON CONFLICT (zip_path) DO UPDATE SET
                   type = EXCLUDED.type,
                   zip_name = EXCLUDED.zip_name,
                   status = EXCLUDED.status,
                   error_msg = EXCLUDED.error_msg,
+                  is_feedback = EXCLUDED.is_feedback,
                   updated_at = NOW()
                 """
-                cur.execute(sql, (rec_type, zip_name, zip_path, status, major_error))
-            conn.commit()
-        except Exception as ex:
-            if conn is not None:
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
-            self._handle_db_exception(ex)
-            raise
-        finally:
-            self._release_conn(active_pool, conn)
+                cur.execute(sql, (rec_type, zip_name, zip_path, status, major_error, bool(is_feedback)))
 
     def _ensure_map_path_config_table(self):
         if self._map_table_ready:
@@ -221,10 +225,7 @@ class PgClient:
             if self._map_table_ready:
                 return
 
-            active_pool = None
-            conn = None
-            try:
-                active_pool, conn = self._acquire_conn()
+            with self._transaction() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         f"""
@@ -253,18 +254,14 @@ class PgClient:
                         ON {self.MAP_PATH_TABLE} (enabled, sync_types)
                         """
                     )
-                conn.commit()
-                self._map_table_ready = True
-            except Exception as ex:
-                if conn is not None:
-                    try:
-                        conn.rollback()
-                    except Exception:
-                        pass
-                self._handle_db_exception(ex)
-                raise
-            finally:
-                self._release_conn(active_pool, conn)
+                    # Ensure zip_task_status has is_feedback column for direct lookup
+                    cur.execute(
+                        f"""
+                        ALTER TABLE {self.cfg.DB_TASK_TABLE}
+                        ADD COLUMN IF NOT EXISTS is_feedback BOOLEAN NOT NULL DEFAULT FALSE
+                        """
+                    )
+            self._map_table_ready = True
 
     @staticmethod
     def _normalize_fs_path(path_value) -> str:
@@ -333,10 +330,7 @@ class PgClient:
         return rows
 
     def _query_map_path_configs_from_db(self):
-        active_pool = None
-        conn = None
-        try:
-            active_pool, conn = self._acquire_conn()
+        with self._readonly() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     f"""
@@ -347,26 +341,21 @@ class PgClient:
                 )
                 rows = cur.fetchall()
 
-            data = []
-            for row in rows:
-                data.append(
-                    {
-                        "id": row[0],
-                        "sync_types": row[1],
-                        "watch_dir": row[2],
-                        "target_dir": row[3],
-                        "is_feedback": bool(row[4]),
-                        "enabled": bool(row[5]),
-                        "created_at": row[6].strftime("%Y-%m-%d %H:%M:%S") if row[6] else None,
-                        "updated_at": row[7].strftime("%Y-%m-%d %H:%M:%S") if row[7] else None,
-                    }
-                )
-            return data
-        except Exception as ex:
-            self._handle_db_exception(ex)
-            raise
-        finally:
-            self._release_conn(active_pool, conn)
+        data = []
+        for row in rows:
+            data.append(
+                {
+                    "id": row[0],
+                    "sync_types": row[1],
+                    "watch_dir": row[2],
+                    "target_dir": row[3],
+                    "is_feedback": bool(row[4]),
+                    "enabled": bool(row[5]),
+                    "created_at": row[6].strftime("%Y-%m-%d %H:%M:%S") if row[6] else None,
+                    "updated_at": row[7].strftime("%Y-%m-%d %H:%M:%S") if row[7] else None,
+                }
+            )
+        return data
 
     def get_map_path_configs(self, only_enabled=False):
         return self._get_map_path_configs_cached(only_enabled=only_enabled)
@@ -381,11 +370,8 @@ class PgClient:
         normalized_watch = str(Path(watch_dir))
         normalized_target = str(Path(target_dir))
 
-        active_pool = None
-        conn = None
-        try:
-            self._ensure_map_path_config_table()
-            active_pool, conn = self._acquire_conn()
+        self._ensure_map_path_config_table()
+        with self._transaction() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     f"""
@@ -401,18 +387,7 @@ class PgClient:
                         bool(enabled),
                     ),
                 )
-            conn.commit()
-            self._invalidate_map_path_cache()
-        except Exception as ex:
-            if conn is not None:
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
-            self._handle_db_exception(ex)
-            raise
-        finally:
-            self._release_conn(active_pool, conn)
+        self._invalidate_map_path_cache()
 
     def update_map_path_config(
         self,
@@ -430,11 +405,8 @@ class PgClient:
         normalized_watch = str(Path(watch_dir))
         normalized_target = str(Path(target_dir))
 
-        active_pool = None
-        conn = None
-        try:
-            self._ensure_map_path_config_table()
-            active_pool, conn = self._acquire_conn()
+        self._ensure_map_path_config_table()
+        with self._transaction() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     f"""
@@ -458,18 +430,7 @@ class PgClient:
                 )
                 if cur.rowcount == 0:
                     raise ValueError(f"配置不存在：id={config_id}")
-            conn.commit()
-            self._invalidate_map_path_cache()
-        except Exception as ex:
-            if conn is not None:
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
-            self._handle_db_exception(ex)
-            raise
-        finally:
-            self._release_conn(active_pool, conn)
+        self._invalidate_map_path_cache()
 
     def upsert_map_path_config(
         self, sync_types, watch_dir, target_dir, enabled=True, is_feedback=False
@@ -495,28 +456,14 @@ class PgClient:
         )
 
     def delete_map_path_config(self, config_id):
-        active_pool = None
-        conn = None
-        try:
-            self._ensure_map_path_config_table()
-            active_pool, conn = self._acquire_conn()
+        self._ensure_map_path_config_table()
+        with self._transaction() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     f"DELETE FROM {self.MAP_PATH_TABLE} WHERE id = %s",
                     (int(config_id),),
                 )
-            conn.commit()
-            self._invalidate_map_path_cache()
-        except Exception as ex:
-            if conn is not None:
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
-            self._handle_db_exception(ex)
-            raise
-        finally:
-            self._release_conn(active_pool, conn)
+        self._invalidate_map_path_cache()
 
     def get_active_watch_dirs(self):
         rows = self.get_map_path_configs(only_enabled=True)
@@ -588,14 +535,20 @@ class PgClient:
             default_target,
         )
 
+    def _scope_where_sql_direct(self, scope: str, alias: str) -> str:
+        """使用 is_feedback 列直接过滤，避免子查询。"""
+        normalized = self._normalize_stats_scope(scope)
+        if normalized == "feedback":
+            return f"WHERE {alias}.is_feedback = TRUE"
+        if normalized == "normal":
+            return f"WHERE {alias}.is_feedback = FALSE"
+        return ""
+
     def get_dashboard_metrics(self, scope="all"):
         scope = self._normalize_stats_scope(scope)
-        active_pool = None
-        conn = None
-        try:
-            active_pool, conn = self._acquire_conn()
+        with self._readonly() as conn:
             with conn.cursor() as cur:
-                task_scope_where = self._scope_where_sql(scope, "t")
+                task_scope_where = self._scope_where_sql_direct(scope, "t")
                 cur.execute(
                     f"""
                     SELECT
@@ -641,29 +594,24 @@ class PgClient:
                     for row in cur.fetchall()
                 ]
 
-            return {
-                "summary": {
-                    "total_tasks": total_tasks or 0,
-                    "pending_tasks": pending_tasks or 0,
-                    "success_tasks": success_tasks or 0,
-                    "failed_tasks": failed_tasks or 0,
-                    "feedback_tasks": (total_tasks or 0)
-                    if scope == "feedback"
-                    else 0,
-                    "normal_tasks": (total_tasks or 0)
-                    if scope == "normal"
-                    else 0,
-                    "total_records": total_records or 0,
-                },
-                "by_type": by_type,
-                "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "scope": scope,
-            }
-        except Exception as ex:
-            self._handle_db_exception(ex)
-            raise
-        finally:
-            self._release_conn(active_pool, conn)
+        return {
+            "summary": {
+                "total_tasks": total_tasks or 0,
+                "pending_tasks": pending_tasks or 0,
+                "success_tasks": success_tasks or 0,
+                "failed_tasks": failed_tasks or 0,
+                "feedback_tasks": (total_tasks or 0)
+                if scope == "feedback"
+                else 0,
+                "normal_tasks": (total_tasks or 0)
+                if scope == "normal"
+                else 0,
+                "total_records": total_records or 0,
+            },
+            "by_type": by_type,
+            "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "scope": scope,
+        }
 
     def get_recent_tasks(self, page=1, page_size=20, keyword="", scope="all"):
         page = max(1, int(page or 1))
@@ -672,10 +620,7 @@ class PgClient:
         kw = (keyword or "").strip()
         scope = self._normalize_stats_scope(scope)
 
-        active_pool = None
-        conn = None
-        try:
-            active_pool, conn = self._acquire_conn()
+        with self._readonly() as conn:
             with conn.cursor() as cur:
                 where_parts = []
                 params = []
@@ -685,7 +630,7 @@ class PgClient:
                         "(t.type ILIKE %s OR t.zip_name ILIKE %s OR t.status ILIKE %s OR COALESCE(t.error_msg, '') ILIKE %s OR t.zip_path ILIKE %s)"
                     )
                     params.extend([like_kw, like_kw, like_kw, like_kw, like_kw])
-                scope_where = self._scope_where_sql(scope, "t")
+                scope_where = self._scope_where_sql_direct(scope, "t")
                 if scope_where:
                     where_parts.append(scope_where.replace("WHERE ", "", 1).strip())
                 where_sql = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
@@ -701,7 +646,6 @@ class PgClient:
                 )
                 (total,) = cur.fetchone()
 
-                feedback_match = self._feedback_match_condition("t")
                 cur.execute(
                     f"""
                     SELECT
@@ -711,7 +655,7 @@ class PgClient:
                       t.error_msg,
                       t.zip_path,
                       t.updated_at,
-                      {feedback_match} AS is_feedback
+                      t.is_feedback
                     FROM {self.cfg.DB_TASK_TABLE} t
                     {where_sql}
                     ORDER BY t.updated_at DESC
@@ -720,35 +664,30 @@ class PgClient:
                     base_params + (page_size, offset),
                 )
                 rows = cur.fetchall()
-            items = [
-                {
-                    "type": row[0],
-                    "zip_name": row[1],
-                    "status": row[2],
-                    "error_msg": row[3],
-                    "zip_path": row[4],
-                    "updated_at": row[5].strftime("%Y-%m-%d %H:%M:%S")
-                    if row[5]
-                    else None,
-                    "is_feedback": bool(row[6]),
-                }
-                for row in rows
-            ]
-            total_pages = max(1, (total + page_size - 1) // page_size) if total else 1
-            return {
-                "items": items,
-                "page": page,
-                "page_size": page_size,
-                "total": total or 0,
-                "total_pages": total_pages,
-                "q": kw,
-                "scope": scope,
+        items = [
+            {
+                "type": row[0],
+                "zip_name": row[1],
+                "status": row[2],
+                "error_msg": row[3],
+                "zip_path": row[4],
+                "updated_at": row[5].strftime("%Y-%m-%d %H:%M:%S")
+                if row[5]
+                else None,
+                "is_feedback": bool(row[6]),
             }
-        except Exception as ex:
-            self._handle_db_exception(ex)
-            raise
-        finally:
-            self._release_conn(active_pool, conn)
+            for row in rows
+        ]
+        total_pages = max(1, (total + page_size - 1) // page_size) if total else 1
+        return {
+            "items": items,
+            "page": page,
+            "page_size": page_size,
+            "total": total or 0,
+            "total_pages": total_pages,
+            "q": kw,
+            "scope": scope,
+        }
 
     def get_recent_records(self, page=1, page_size=20, keyword="", scope="all"):
         page = max(1, int(page or 1))
@@ -757,10 +696,7 @@ class PgClient:
         kw = (keyword or "").strip()
         scope = self._normalize_stats_scope(scope)
 
-        active_pool = None
-        conn = None
-        try:
-            active_pool, conn = self._acquire_conn()
+        with self._readonly() as conn:
             with conn.cursor() as cur:
                 where_parts = []
                 params = []
@@ -796,49 +732,39 @@ class PgClient:
                     base_params + (page_size, offset),
                 )
                 rows = cur.fetchall()
-            items = [
-                {
-                    "type": row[0],
-                    "lot_id": row[1],
-                    "wafer_id": row[2],
-                    "zip_name": row[3],
-                    "zip_path": row[4],
-                    "created_at": row[5].strftime("%Y-%m-%d %H:%M:%S")
-                    if row[5]
-                    else None,
-                }
-                for row in rows
-            ]
-            total_pages = max(1, (total + page_size - 1) // page_size) if total else 1
-            return {
-                "items": items,
-                "page": page,
-                "page_size": page_size,
-                "total": total or 0,
-                "total_pages": total_pages,
-                "q": kw,
-                "scope": scope,
+        items = [
+            {
+                "type": row[0],
+                "lot_id": row[1],
+                "wafer_id": row[2],
+                "zip_name": row[3],
+                "zip_path": row[4],
+                "created_at": row[5].strftime("%Y-%m-%d %H:%M:%S")
+                if row[5]
+                else None,
             }
-        except Exception as ex:
-            self._handle_db_exception(ex)
-            raise
-        finally:
-            self._release_conn(active_pool, conn)
+            for row in rows
+        ]
+        total_pages = max(1, (total + page_size - 1) // page_size) if total else 1
+        return {
+            "items": items,
+            "page": page,
+            "page_size": page_size,
+            "total": total or 0,
+            "total_pages": total_pages,
+            "q": kw,
+            "scope": scope,
+        }
 
     def check_health(self):
-        active_pool = None
-        conn = None
         try:
-            active_pool, conn = self._acquire_conn()
-            with conn.cursor() as cur:
-                cur.execute("SELECT 1")
-                cur.fetchone()
+            with self._readonly() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+                    cur.fetchone()
             return True, None
         except Exception as ex:
-            self._handle_db_exception(ex)
             return False, summarize_error_msg(ex)
-        finally:
-            self._release_conn(active_pool, conn)
 
     def close(self):
         try:

@@ -153,7 +153,8 @@ def load_config() -> Config:
             print(f"[配置] 读取配置失败，使用默认配置: {ex}")
 
     global _SYNC_TYPES_RAW
-    _SYNC_TYPES_RAW = raw.get("SYNC_TYPES") if raw else None
+    sync_types_raw = raw.get("SYNC_TYPES") if raw else None
+    _SYNC_TYPES_RAW = sync_types_raw
 
     merged = dict(default_cfg.__dict__)
     if raw:
@@ -191,14 +192,18 @@ def load_config() -> Config:
     merged["CHECK_MAP_FILENAME_FORMAT"] = _to_bool(merged["CHECK_MAP_FILENAME_FORMAT"])
     merged["INITIAL_SCAN"] = _to_bool(merged["INITIAL_SCAN"])
     merged["WEB_PORT"] = int(merged["WEB_PORT"])
-    merged["SYNC_TYPES"] = _normalize_sync_types(_SYNC_TYPES_RAW)
+    merged["SYNC_TYPES"] = _normalize_sync_types(sync_types_raw)
 
     if config_loaded:
         print(f"[配置] 已加载配置文件: {cfg_path}")
     return Config(**merged)
 
 
-def validate_config(cfg: Config):
+def validate_config(cfg: Config, sync_types_raw=None):
+    """校验配置。sync_types_raw 为原始 JSON 值，若不传则使用模块级缓存。"""
+    if sync_types_raw is None:
+        sync_types_raw = _SYNC_TYPES_RAW
+
     errors = []
 
     def report(message: str):
@@ -264,11 +269,11 @@ def validate_config(cfg: Config):
     ]:
         check_non_empty(key, getattr(cfg, key))
 
-    if _SYNC_TYPES_RAW is not None:
-        if not isinstance(_SYNC_TYPES_RAW, list):
+    if sync_types_raw is not None:
+        if not isinstance(sync_types_raw, list):
             report("SYNC_TYPES 必须是字符串数组（可为空）")
         else:
-            for idx, raw_item in enumerate(_SYNC_TYPES_RAW):
+            for idx, raw_item in enumerate(sync_types_raw):
                 if not isinstance(raw_item, str):
                     report(f"SYNC_TYPES[{idx}] 必须是字符串")
                 elif not raw_item.strip():
@@ -279,3 +284,4 @@ def validate_config(cfg: Config):
         for err in errors:
             print(f"  - {err}")
         raise SystemExit(1)
+

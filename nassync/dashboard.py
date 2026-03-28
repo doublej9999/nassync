@@ -1,4 +1,4 @@
-﻿import json
+import json
 import logging
 import threading
 import time
@@ -13,7 +13,23 @@ from .watcher import ServiceLifecycle
 
 logger = logging.getLogger("watcher")
 _TEMPLATE_PATH = Path(__file__).resolve().parent / "templates" / "dashboard.html"
-DASHBOARD_HTML = _TEMPLATE_PATH.read_text(encoding="utf-8")
+
+
+def _load_dashboard_html() -> str:
+    """Load dashboard HTML with fallback for PyInstaller bundles."""
+    if _TEMPLATE_PATH.is_file():
+        return _TEMPLATE_PATH.read_text(encoding="utf-8")
+    try:
+        import importlib.resources as pkg_resources
+        ref = pkg_resources.files("nassync.templates").joinpath("dashboard.html")
+        return ref.read_text(encoding="utf-8")
+    except Exception:
+        pass
+    logger.warning("Dashboard 模板文件未找到：%s，使用内置占位页面", _TEMPLATE_PATH)
+    return "<html><body><h1>NAS Sync Dashboard</h1><p>模板文件未找到，请检查安装。</p></body></html>"
+
+
+DASHBOARD_HTML = _load_dashboard_html()
 
 
 def create_dashboard_handler(pg: PgClient, lifecycle: ServiceLifecycle, cfg: Config):

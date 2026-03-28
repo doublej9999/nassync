@@ -1,4 +1,4 @@
-﻿import json
+import json
 import os
 import sys
 import zipfile
@@ -88,7 +88,7 @@ class DummyPg:
     def __init__(self):
         self.status_calls = []
 
-    def upsert_task_status(self, rec_type, zip_name, zip_path, status, error_msg=None):
+    def upsert_task_status(self, rec_type, zip_name, zip_path, status, error_msg=None, is_feedback=False):
         self.status_calls.append(
             {
                 "type": rec_type,
@@ -96,6 +96,7 @@ class DummyPg:
                 "zip_path": zip_path,
                 "status": status,
                 "error_msg": error_msg,
+                "is_feedback": is_feedback,
             }
         )
 

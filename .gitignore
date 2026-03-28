@@ -1,11 +1,11 @@
-﻿# 忽略数据与构建产物目录
+# 忽略数据与构建产物目录
 /A/
 /B/
 /build/
 /dist/
 /logs/
-/nassync.spec
 /.venv-build-win/
 __pycache__/
 *.pyc
 /tests/.runtime/
+/config.json

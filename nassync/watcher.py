@@ -1,6 +1,7 @@
-﻿import logging
+import logging
 import threading
 import time
+from collections import OrderedDict
 from pathlib import Path
 
 from watchdog.events import FileSystemEventHandler
@@ -8,13 +9,16 @@ from watchdog.observers import Observer
 
 logger = logging.getLogger("watcher")
 
+_DEFAULT_DEDUP_MAX_ENTRIES = 5000
+
 
 class Handler(FileSystemEventHandler):
-    def __init__(self, worker_pool, dedup_window_sec=1.0):
+    def __init__(self, worker_pool, dedup_window_sec=1.0, dedup_max_entries=_DEFAULT_DEDUP_MAX_ENTRIES):
         self.worker_pool = worker_pool
         self._dedup_window_sec = max(0.0, float(dedup_window_sec))
+        self._dedup_max_entries = max(100, int(dedup_max_entries))
         self._event_lock = threading.Lock()
-        self._last_event_ts = {}
+        self._last_event_ts: OrderedDict[str, float] = OrderedDict()
         self._active = threading.Event()
         self._active.set()
 
@@ -37,13 +41,13 @@ class Handler(FileSystemEventHandler):
                 if last_ts is not None and (ts - last_ts) < self._dedup_window_sec:
                     logger.debug("事件去抖跳过：%s", path)
                     return
+            # Move to end (most recent) and update timestamp
             self._last_event_ts[key] = ts
+            self._last_event_ts.move_to_end(key)
 
-            if len(self._last_event_ts) > 5000:
-                expire_before = ts - max(1.0, self._dedup_window_sec * 5)
-                self._last_event_ts = {
-                    p: t for p, t in self._last_event_ts.items() if t >= expire_before
-                }
+            # Evict oldest entries when exceeding limit
+            while len(self._last_event_ts) > self._dedup_max_entries:
+                self._last_event_ts.popitem(last=False)
 
         self.worker_pool.enqueue(path)
 
