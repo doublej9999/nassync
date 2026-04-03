@@ -8,7 +8,7 @@ from watchdog.observers.polling import PollingObserver
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from nassync.app import InitialScanState, _create_observer
+from nassync.app import _create_observer
 from nassync.config import is_nas_path, load_config, normalize_dir_path, validate_config
 
 
@@ -95,13 +95,3 @@ def test_validate_config_rejects_invalid_identifier(tmp_path: Path):
     with pytest.raises(SystemExit):
         validate_config(cfg)
 
-
-def test_initial_scan_state_read_write(tmp_path: Path):
-    state_file = tmp_path / "scan-state.json"
-    state = InitialScanState(state_file)
-    watch_dir = tmp_path / "A"
-
-    assert state.get_last_scan_ts(watch_dir) == 0.0
-    state.update_last_scan_ts(watch_dir, 123.45)
-    state2 = InitialScanState(state_file)
-    assert state2.get_last_scan_ts(watch_dir) == pytest.approx(123.45)

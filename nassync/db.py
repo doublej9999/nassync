@@ -252,6 +252,7 @@ class PgClient:
                             watch_dir VARCHAR(1000) NOT NULL,
                             target_dir VARCHAR(1000) NOT NULL,
                             file_suffixes VARCHAR(500) NOT NULL DEFAULT '',
+                            last_scan DOUBLE PRECISION NOT NULL DEFAULT 0,
                             is_feedback BOOLEAN NOT NULL DEFAULT FALSE,
                             enabled BOOLEAN NOT NULL DEFAULT TRUE,
                             created_at TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -270,6 +271,12 @@ class PgClient:
                         f"""
                         ALTER TABLE {self.MAP_PATH_TABLE}
                         ADD COLUMN IF NOT EXISTS is_feedback BOOLEAN NOT NULL DEFAULT FALSE
+                        """
+                    )
+                    cur.execute(
+                        f"""
+                        ALTER TABLE {self.MAP_PATH_TABLE}
+                        ADD COLUMN IF NOT EXISTS last_scan DOUBLE PRECISION NOT NULL DEFAULT 0
                         """
                     )
                     cur.execute(
@@ -389,7 +396,7 @@ class PgClient:
             with conn.cursor() as cur:
                 cur.execute(
                     f"""
-                    SELECT id, sync_types, watch_dir, target_dir, file_suffixes, is_feedback, enabled, created_at, updated_at
+                    SELECT id, sync_types, watch_dir, target_dir, file_suffixes, last_scan, is_feedback, enabled, created_at, updated_at
                     FROM {self.MAP_PATH_TABLE}
                     ORDER BY sync_types, watch_dir
                     """
@@ -405,10 +412,11 @@ class PgClient:
                     "watch_dir": row[2],
                     "target_dir": row[3],
                     "file_suffixes": self._normalize_file_suffixes(row[4]),
-                    "is_feedback": bool(row[5]),
-                    "enabled": bool(row[6]),
-                    "created_at": row[7].strftime("%Y-%m-%d %H:%M:%S") if row[7] else None,
-                    "updated_at": row[8].strftime("%Y-%m-%d %H:%M:%S") if row[8] else None,
+                    "last_scan": float(row[5] or 0),
+                    "is_feedback": bool(row[6]),
+                    "enabled": bool(row[7]),
+                    "created_at": row[8].strftime("%Y-%m-%d %H:%M:%S") if row[8] else None,
+                    "updated_at": row[9].strftime("%Y-%m-%d %H:%M:%S") if row[9] else None,
                 }
             )
         return data
@@ -542,6 +550,45 @@ class PgClient:
             seen.add(normalized)
             uniq.append(str(Path(watch_dir)))
         return uniq
+
+    def get_map_path_last_scan(self, watch_dir: Path) -> float:
+        self._ensure_map_path_config_table()
+        watch_dir_str = str(Path(watch_dir))
+        with self._readonly() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT last_scan
+                    FROM {self.MAP_PATH_TABLE}
+                    WHERE LOWER(watch_dir) = LOWER(%s)
+                    LIMIT 1
+                    """,
+                    (watch_dir_str,),
+                )
+                row = cur.fetchone()
+        if not row:
+            return 0.0
+        try:
+            return float(row[0] or 0)
+        except Exception:
+            return 0.0
+
+    def update_map_path_last_scan(self, watch_dir: Path, last_scan_ts: float):
+        self._ensure_map_path_config_table()
+        watch_dir_str = str(Path(watch_dir))
+        value = float(last_scan_ts or 0)
+        with self._transaction() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    UPDATE {self.MAP_PATH_TABLE}
+                    SET last_scan = %s,
+                        updated_at = NOW()
+                    WHERE LOWER(watch_dir) = LOWER(%s)
+                    """,
+                    (value, watch_dir_str),
+                )
+        self._invalidate_map_path_cache()
 
     def match_map_path_config(self, zip_path: Path):
         path_norm = self._normalize_fs_path(zip_path)

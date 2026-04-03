@@ -48,6 +48,8 @@ CREATE TABLE IF NOT EXISTS map_path_config (
     sync_types VARCHAR(50) NOT NULL,
     watch_dir VARCHAR(1000) NOT NULL,
     target_dir VARCHAR(1000) NOT NULL,
+    file_suffixes VARCHAR(500) NOT NULL DEFAULT '',
+    last_scan DOUBLE PRECISION NOT NULL DEFAULT 0,
     is_feedback BOOLEAN NOT NULL DEFAULT FALSE,
     enabled BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -57,6 +59,12 @@ CREATE TABLE IF NOT EXISTS map_path_config (
 
 ALTER TABLE map_path_config
 ADD COLUMN IF NOT EXISTS is_feedback BOOLEAN NOT NULL DEFAULT FALSE;
+
+ALTER TABLE map_path_config
+ADD COLUMN IF NOT EXISTS file_suffixes VARCHAR(500) NOT NULL DEFAULT '';
+
+ALTER TABLE map_path_config
+ADD COLUMN IF NOT EXISTS last_scan DOUBLE PRECISION NOT NULL DEFAULT 0;
 
 CREATE INDEX IF NOT EXISTS idx_map_path_config_enabled
 ON map_path_config (enabled, sync_types);

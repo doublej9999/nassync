@@ -3,7 +3,7 @@
 一个用于 **NAS 目录自动监听** 的小工具：
 
 - 监听 `A` 目录下新增/变更的 `.zip` 文件
-- 支持在页面维护 `map_path_config`（`WATCH_DIR`/`TARGET_DIR`/`SYNC_TYPES`/`FILE_SUFFIXES`）
+- 支持在页面维护 `map_path_config`（`WATCH_DIR`/`TARGET_DIR`/`SYNC_TYPES`/`FILE_SUFFIXES`/`LAST_SCAN`）
 - 校验 ZIP 内 `.MAP` 文件名并提取 LOT/WAFER
 - 提取 `LOT/WAFER` 信息写入 PostgreSQL
 - 将 ZIP 从 `WATCH_DIR` 搬运到 `TARGET_DIR` 后再入库
@@ -104,10 +104,11 @@ pip install -r requirements.txt
   - `FILE_STABLE_CHECK_TIMES` / `FILE_STABLE_CHECK_INTERVAL_SEC`
   - `PROCESS_RETRY_TIMES` / `PROCESS_RETRY_INTERVAL_SEC` / `PROCESS_RETRY_BACKOFF_MAX_SEC`
   - `TASK_QUEUE_MAX_SIZE` / `EVENT_DEDUP_WINDOW_SEC` / `DASHBOARD_CACHE_TTL_SEC`
-  - `INITIAL_SCAN`（启动时是否扫描历史 ZIP）
+  - `INITIAL_SCAN`（启动时是否执行增量扫描）
 - Web 面板：`WEB_HOST`、`WEB_PORT`
 - 同步控制：`SYNC_TYPES` 作为回退配置；生产建议通过页面写入 `map_path_config.sync_types`
 - 后缀控制：生产建议通过页面写入 `map_path_config.file_suffixes`（留空=不限）
+- 增量扫描游标：由 `map_path_config.last_scan` 持久化（不再使用本地 JSON 状态文件）
 
 示例（本地目录）：
 
@@ -151,6 +152,7 @@ pip install -r requirements.txt
 - `watch_dir`：监听目录
 - `target_dir`：目标目录
 - `file_suffixes`：后缀过滤，逗号分隔（如 `.zip,.tar`）；留空表示不限
+- `last_scan`：增量扫描上次游标（UNIX 时间戳，秒）
 - `is_feedback`：是否回传（回传任务跳过 `zip_record` 入库）
 - `enabled`：是否启用
 
@@ -236,6 +238,7 @@ dist\windows\nassync.exe
 ## 8. 日志与排错
 
 - 日志目录：`logs/watcher.log`（按天滚动，保留 30 天）
+- 增量扫描游标存储：数据库 `map_path_config.last_scan`
 - 常见失败原因：
   - 文件上传未完成导致“不稳定”
   - ZIP 与 MAP 前缀不一致
