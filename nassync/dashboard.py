@@ -94,14 +94,17 @@ def create_dashboard_handler(pg: PgClient, lifecycle: ServiceLifecycle, cfg: Con
                 watcher_state = "running" if lifecycle.watcher_healthy() else "stopped"
                 web_state = "running" if lifecycle.web_healthy() else "stopped"
                 db_ok, db_msg = pg.check_health()
+                runtime_metrics = pg.get_runtime_metrics() if hasattr(pg, "get_runtime_metrics") else {}
                 payload = {
                     "status": "ok" if db_ok else "degraded",
+                    "role": lifecycle.get_role() if hasattr(lifecycle, "get_role") else "unknown",
                     "watcher": watcher_state,
                     "web": web_state,
                     "db": "ok" if db_ok else "error",
                     "db_error": db_msg,
                     "shutting_down": lifecycle.is_shutting_down(),
                 }
+                payload.update(runtime_metrics or {})
                 self._send_json(payload)
                 return
 
