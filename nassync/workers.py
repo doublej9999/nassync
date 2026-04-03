@@ -1,4 +1,5 @@
-﻿import logging
+﻿import heapq
+import logging
 import os
 import queue
 import threading
@@ -25,6 +26,19 @@ class TaskWorkerPool:
         self._queued_paths = set()
         self._queue_lock = threading.Lock()
         self._workers = []
+
+        self._retry_heap = []
+        self._retry_seq = 0
+        self._retry_lock = threading.Lock()
+        self._retry_event = threading.Event()
+
+        self._retry_thread = threading.Thread(
+            target=self._run_retry_scheduler,
+            name="retry-scheduler",
+            daemon=True,
+        )
+        self._retry_thread.start()
+
         for idx in range(worker_count):
             worker = threading.Thread(
                 target=self._run_worker,
@@ -70,7 +84,7 @@ class TaskWorkerPool:
             try:
                 retry_delay = self.processor.process(path)
                 if retry_delay is not None:
-                    self._enqueue_later(path, retry_delay)
+                    self._schedule_retry(path, retry_delay)
             except Exception:
                 logger.exception("Worker 处理时遇到未捕获异常：%s", path)
             finally:
@@ -78,28 +92,47 @@ class TaskWorkerPool:
                     self._queued_paths.discard(str(path))
                 self.queue.task_done()
 
-    def _enqueue_later(self, path: Path, delay_sec):
+    def _schedule_retry(self, path: Path, delay_sec):
         try:
             delay = float(delay_sec)
         except (TypeError, ValueError):
             delay = 0.0
         delay = max(0.1, delay)
+        due = time.monotonic() + delay
 
-        def _delayed_enqueue():
-            if self._stop_event.wait(delay):
-                return
-            logger.info("任务重入队列：%s（延迟 %.2fs）", path, delay)
-            self.enqueue(path)
+        with self._retry_lock:
+            self._retry_seq += 1
+            heapq.heappush(self._retry_heap, (due, self._retry_seq, Path(path), delay))
+        self._retry_event.set()
 
-        t = threading.Thread(
-            target=_delayed_enqueue,
-            name=f"retry-enqueue-{int(time.time() * 1000)}",
-            daemon=True,
-        )
-        t.start()
+    def _run_retry_scheduler(self):
+        while not self._stop_event.is_set():
+            item = None
+            wait_timeout = None
+
+            with self._retry_lock:
+                if self._retry_heap:
+                    due, seq, path, delay = self._retry_heap[0]
+                    now = time.monotonic()
+                    if due <= now:
+                        item = heapq.heappop(self._retry_heap)
+                    else:
+                        wait_timeout = max(0.05, due - now)
+
+            if item is not None:
+                _, _, path, delay = item
+                if self._stop_event.is_set():
+                    return
+                logger.info("任务重入队列：%s（延迟 %.2fs）", path, delay)
+                self.enqueue(path)
+                continue
+
+            self._retry_event.wait(timeout=wait_timeout)
+            self._retry_event.clear()
 
     def shutdown(self, wait=True):
         self._stop_event.set()
+        self._retry_event.set()
         if wait:
             self.queue.join()
         for _ in self._workers:
@@ -111,3 +144,5 @@ class TaskWorkerPool:
                     time.sleep(0.05)
         for worker in self._workers:
             worker.join(timeout=5)
+        if self._retry_thread.is_alive():
+            self._retry_thread.join(timeout=5)

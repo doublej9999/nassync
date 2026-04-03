@@ -1,8 +1,9 @@
-﻿import logging
+﻿import json
+import logging
 import threading
 import time
-from pathlib import Path
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 
 from watchdog.observers import Observer
 from watchdog.observers.polling import PollingObserver
@@ -17,6 +18,44 @@ from .watcher import Handler, ServiceLifecycle
 from .workers import TaskWorkerPool
 
 logger = logging.getLogger("watcher")
+
+
+class InitialScanState:
+    def __init__(self, state_file: Path):
+        self.state_file = state_file
+        self._lock = threading.Lock()
+        self._state = self._load()
+
+    def _load(self):
+        if not self.state_file.exists():
+            return {}
+        try:
+            data = json.loads(self.state_file.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            pass
+        return {}
+
+    def get_last_scan_ts(self, watch_dir: Path) -> float:
+        key = str(watch_dir).lower()
+        raw = self._state.get(key)
+        try:
+            return float(raw or 0)
+        except Exception:
+            return 0.0
+
+    def update_last_scan_ts(self, watch_dir: Path, ts: float):
+        key = str(watch_dir).lower()
+        with self._lock:
+            self._state[key] = float(ts)
+            self.state_file.parent.mkdir(parents=True, exist_ok=True)
+            tmp_file = self.state_file.with_suffix(".tmp")
+            tmp_file.write_text(
+                json.dumps(self._state, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            tmp_file.replace(self.state_file)
 
 
 def _create_observer(watch_dirs):
@@ -35,6 +74,8 @@ def main():
     cfg = load_config()
     validate_config(cfg)
     setup_logging(cfg)
+
+    scan_state = InitialScanState(cfg.LOG_DIR / "initial_scan_state.json")
 
     pg = PgClient(cfg)
     try:
@@ -80,12 +121,31 @@ def main():
         if not cfg.INITIAL_SCAN:
             return
 
-        for f in watch_dir.rglob("*"):
-            if f.is_file() and f.suffix.lower() == ".zip":
-                handler._handle_event(f)
+        last_scan_ts = scan_state.get_last_scan_ts(watch_dir)
+        scheduled_count = 0
+        newest_mtime = last_scan_ts
 
+        for f in watch_dir.rglob("*.zip"):
+            if not f.is_file():
+                continue
+            try:
+                mtime = float(f.stat().st_mtime)
+            except Exception:
+                continue
+            newest_mtime = max(newest_mtime, mtime)
+            if mtime <= last_scan_ts:
+                continue
+            handler._handle_event(f)
+            scheduled_count += 1
+
+        scan_state.update_last_scan_ts(watch_dir, max(time.time(), newest_mtime))
         scanned_watch_dirs.add(key)
-        logger.info("启动扫描完成：%s", watch_dir)
+        logger.info(
+            "启动增量扫描完成：%s（上次=%.3f，本次入队=%s）",
+            watch_dir,
+            last_scan_ts,
+            scheduled_count,
+        )
 
     def ensure_observer_running(force=False):
         nonlocal last_watch_attempt_at, current_watch_key

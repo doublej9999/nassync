@@ -1,10 +1,11 @@
-import errno
+﻿import errno
 import logging
 import os
 import re
 import shutil
 import threading
 import time
+import uuid
 import zipfile
 from pathlib import Path
 
@@ -25,6 +26,18 @@ class Processor:
         self.processing = set()
         self.lock = threading.Lock()
         self.sync_types = set(cfg.SYNC_TYPES)
+
+    def _log_with_fields(self, level: int, message: str, **fields):
+        logger.log(level, message, extra=fields)
+
+    def _invoke_process(self, path: Path, trace_id: str):
+        try:
+            return self._process(path, trace_id=trace_id)
+        except TypeError as ex:
+            if "unexpected keyword argument 'trace_id'" not in str(ex):
+                raise
+            # 兼容测试中对 _process 的猴子补丁（旧签名）
+            return self._process(path)
 
     def _resolve_route(self, path: Path):
         if "BACKUP" in [p.upper() for p in path.parts]:
@@ -100,14 +113,26 @@ class Processor:
     def process(self, path: Path):
         route = self._resolve_route(path)
         if not route:
-            logger.info("跳过（不符合规则或未配置 map_path_config）：%s", path)
+            self._log_with_fields(
+                logging.INFO,
+                "跳过：不符合规则或未匹配 map_path_config",
+                zip_path=str(path),
+            )
             return None
 
+        trace_id = uuid.uuid4().hex[:12]
         rec_type = route["rec_type"]
         is_feedback = bool(route.get("is_feedback"))
         key = str(path)
+        log_fields = {
+            "trace_id": trace_id,
+            "zip_path": key,
+            "sync_type": rec_type,
+            "is_feedback": is_feedback,
+        }
         with self.lock:
             if key in self.processing:
+                self._log_with_fields(logging.DEBUG, "文件已在处理中，忽略重复任务", **log_fields)
                 return None
             self.processing.add(key)
 
@@ -121,9 +146,21 @@ class Processor:
 
             for attempt in range(max_attempts):
                 try:
-                    self.pg.upsert_task_status(rec_type, path.name, str(path), "PENDING", is_feedback=is_feedback)
-                    self._process(path)
-                    self.pg.upsert_task_status(rec_type, path.name, str(path), "SUCCESS", is_feedback=is_feedback)
+                    self.pg.upsert_task_status(
+                        rec_type,
+                        path.name,
+                        str(path),
+                        "PENDING",
+                        is_feedback=is_feedback,
+                    )
+                    self._invoke_process(path, trace_id=trace_id)
+                    self.pg.upsert_task_status(
+                        rec_type,
+                        path.name,
+                        str(path),
+                        "SUCCESS",
+                        is_feedback=is_feedback,
+                    )
                     return None
                 except Exception as ex:
                     last_error = ex
@@ -132,31 +169,27 @@ class Processor:
 
                     if retryable and has_next:
                         delay = self._retry_delay(attempt)
-                        logger.warning(
-                            "处理失败，准备重试：%s (%s/%s), %ss 后重试, err=%s",
-                            path,
-                            attempt + 1,
-                            max_attempts,
-                            f"{delay:.2f}",
-                            summarize_error_msg(ex),
+                        self._log_with_fields(
+                            logging.WARNING,
+                            f"处理失败，准备重试 ({attempt + 1}/{max_attempts})，{delay:.2f}s 后重试: {summarize_error_msg(ex)}",
+                            **log_fields,
                         )
                         time.sleep(delay)
                         continue
 
                     if retryable:
                         deferred_delay = self._retry_delay(max_attempt_idx)
-                        logger.warning(
-                            "处理失败（可恢复），将延迟重试：%s, %ss 后重入队列, err=%s",
-                            path,
-                            f"{deferred_delay:.2f}",
-                            summarize_error_msg(ex),
+                        self._log_with_fields(
+                            logging.WARNING,
+                            f"处理失败（可恢复），将延迟重入队列 {deferred_delay:.2f}s: {summarize_error_msg(ex)}",
+                            **log_fields,
                         )
                         return deferred_delay
 
-                    logger.warning(
-                        "处理失败（不可重试）：%s, err=%s",
-                        path,
-                        summarize_error_msg(ex),
+                    self._log_with_fields(
+                        logging.WARNING,
+                        f"处理失败（不可重试）: {summarize_error_msg(ex)}",
+                        **log_fields,
                     )
                     break
 
@@ -165,34 +198,58 @@ class Processor:
                 if last_error
                 else "处理失败（未知错误）"
             )
-            self._mark_failed(rec_type, path, failure_reason, is_feedback=is_feedback)
+            self._mark_failed(rec_type, path, failure_reason, is_feedback=is_feedback, trace_id=trace_id)
             return None
         except Exception as ex:
-            logger.exception("处理失败：%s, err=%s", path, ex)
+            self._log_with_fields(
+                logging.ERROR,
+                f"处理发生异常: {summarize_error_msg(ex)}",
+                **log_fields,
+            )
             if self._is_retryable_error(ex):
                 deferred_delay = self._retry_delay(max_attempt_idx)
-                logger.warning(
-                    "处理失败（外层可恢复），将延迟重试：%s, %ss 后重入队列, err=%s",
-                    path,
-                    f"{deferred_delay:.2f}",
-                    summarize_error_msg(ex),
+                self._log_with_fields(
+                    logging.WARNING,
+                    f"处理失败（外层可恢复），将延迟重入队列 {deferred_delay:.2f}s",
+                    **log_fields,
                 )
                 return deferred_delay
 
-            self._mark_failed(rec_type, path, f"{type(ex).__name__}: {ex}", is_feedback=is_feedback)
+            self._mark_failed(
+                rec_type,
+                path,
+                f"{type(ex).__name__}: {ex}",
+                is_feedback=is_feedback,
+                trace_id=trace_id,
+            )
             return None
         finally:
             with self.lock:
                 self.processing.discard(key)
 
-    def _mark_failed(self, rec_type: str, path: Path, reason: str, is_feedback: bool = False):
+    def _mark_failed(self, rec_type: str, path: Path, reason: str, is_feedback: bool = False, trace_id: str = ""):
         if self.pg is None:
-            logger.warning("数据库客户端不可用，FAILED 状态未写入：%s, err=%s", path, reason)
+            self._log_with_fields(
+                logging.WARNING,
+                "数据库客户端不可用，FAILED 状态未写入",
+                trace_id=trace_id,
+                zip_path=str(path),
+                sync_type=rec_type,
+                is_feedback=is_feedback,
+                error=reason,
+            )
             return
         try:
             self.pg.upsert_task_status(rec_type, path.name, str(path), "FAILED", reason, is_feedback=is_feedback)
-        except Exception:
-            logger.exception("写入 FAILED 状态失败：%s", path)
+        except Exception as ex:
+            self._log_with_fields(
+                logging.ERROR,
+                f"写入 FAILED 状态失败: {summarize_error_msg(ex)}",
+                trace_id=trace_id,
+                zip_path=str(path),
+                sync_type=rec_type,
+                is_feedback=is_feedback,
+            )
 
     def _retry_delay(self, attempt: int) -> float:
         base = max(0.1, float(self.cfg.PROCESS_RETRY_INTERVAL_SEC))
@@ -272,31 +329,37 @@ class Processor:
         if errors:
             raise RuntimeError("; ".join(errors))
 
-    def _process(self, path: Path):
+    def _process(self, path: Path, trace_id: str = ""):
         route = self._resolve_route(path)
         if not route:
-            logger.info("?????? map_path_config??%s", path)
+            self._log_with_fields(logging.INFO, "跳过：文件未匹配 map_path_config", trace_id=trace_id, zip_path=str(path))
             return True
 
         rec_type = route["rec_type"]
         target_dir = Path(route["target_dir"])
         is_feedback = bool(route.get("is_feedback"))
         path_suffix = path.suffix.lower()
+        log_fields = {
+            "trace_id": trace_id,
+            "zip_path": str(path),
+            "sync_type": rec_type,
+            "is_feedback": is_feedback,
+        }
 
         if not path.exists():
-            logger.info("????????????????%s", path)
+            self._log_with_fields(logging.INFO, "文件已不存在，忽略本次处理", **log_fields)
             return True
 
-        logger.info(
-            "???%s?SYNC_TYPES=%s?WATCH_DIR=%s?TARGET_DIR=%s",
-            path,
-            rec_type,
-            route["watch_dir"],
-            target_dir,
+        self._log_with_fields(
+            logging.INFO,
+            "开始处理文件",
+            watch_dir=str(route["watch_dir"]),
+            target_dir=str(target_dir),
+            **log_fields,
         )
 
         if not self.wait_stable(path):
-            raise RetryableProcessError("?????")
+            raise RetryableProcessError("文件尚未稳定")
 
         source_zip_path = path
         target_dir.mkdir(parents=True, exist_ok=True)
@@ -317,12 +380,14 @@ class Processor:
         working_zip_path = target_zip_path if moved_zip else source_zip_path
 
         if path_suffix != ".zip":
-            logger.info(
-                "completed(move-only): %s -> %s, backup=%s, suffix=%s",
-                source_zip_path,
-                working_zip_path,
-                backup_zip_path,
-                path_suffix or "(none)",
+            self._log_with_fields(
+                logging.INFO,
+                "已完成搬运（非 ZIP 不做入库）",
+                source_zip=str(source_zip_path),
+                target_zip=str(working_zip_path),
+                backup_zip=str(backup_zip_path),
+                suffix=path_suffix or "(none)",
+                **log_fields,
             )
             return True
 
@@ -333,7 +398,7 @@ class Processor:
             lot_wafer_pairs = self.scan_zip(working_zip_path)
 
             if is_feedback:
-                logger.info("????????? zip_record ???%s", working_zip_path)
+                self._log_with_fields(logging.INFO, "回传任务：跳过 zip_record 入库", working_zip=str(working_zip_path), **log_fields)
             else:
                 self.pg.insert_records(
                     rec_type,
@@ -344,13 +409,13 @@ class Processor:
                 )
             conn.commit()
 
-            logger.info(
-                "???%s -> %s???=%s?????=%s?????=%s",
-                source_zip_path,
-                working_zip_path,
-                backup_zip_path,
-                rec_type,
-                "?" if is_feedback else "?",
+            self._log_with_fields(
+                logging.INFO,
+                "处理成功",
+                source_zip=str(source_zip_path),
+                target_zip=str(working_zip_path),
+                backup_zip=str(backup_zip_path),
+                **log_fields,
             )
             return True
         except Exception as ex:
@@ -368,14 +433,13 @@ class Processor:
                 )
             except Exception as rollback_ex:
                 raise RetryableProcessError(
-                    f"?????????: {summarize_error_msg(ex)}; rollback={rollback_ex}"
+                    f"处理失败且回滚失败: {summarize_error_msg(ex)}; rollback={rollback_ex}"
                 ) from ex
 
             raise
         finally:
             if self.pg is not None and active_pool is not None and conn is not None:
                 self.pg.release_connection(active_pool, conn)
-
 
     def scan_zip(self, zip_path):
         lot_wafer_pairs = []
@@ -396,12 +460,12 @@ class Processor:
                     map_prefix = stem.split("-", 1)[0].upper()
                     if map_prefix != zip_prefix:
                         raise ValueError(
-                            f"ZIP 与 MAP 文件名前缀不一致：zip={Path(zip_path).name}, map={f}"
+                            f"ZIP 与 MAP 文件名前缀不一致: zip={Path(zip_path).name}, map={f}"
                         )
 
                 match = map_name_pattern.match(stem)
                 if self.cfg.CHECK_MAP_FILENAME_FORMAT and not match:
-                    raise ValueError(f"MAP 文件名格式错误：{f}，期望格式为 XXXXXX-XX")
+                    raise ValueError(f"MAP 文件名格式错误: {f}，期望格式为 XXXXXX-XX")
 
                 if match:
                     lot_id = match.group(1).upper()
@@ -417,6 +481,6 @@ class Processor:
                 lot_wafer_pairs.append((lot_id, wafer_id))
 
             if not has_map:
-                raise ValueError(f"ZIP 内未找到 MAP 文件：{Path(zip_path).name}")
+                raise ValueError(f"ZIP 内未找到 MAP 文件: {Path(zip_path).name}")
 
             return sorted(set(lot_wafer_pairs))

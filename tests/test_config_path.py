@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import os
 import sys
 
 import pytest
@@ -7,8 +8,8 @@ from watchdog.observers.polling import PollingObserver
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from nassync.app import _create_observer
-from nassync.config import is_nas_path, load_config, normalize_dir_path
+from nassync.app import InitialScanState, _create_observer
+from nassync.config import is_nas_path, load_config, normalize_dir_path, validate_config
 
 
 def test_normalize_dir_path_supports_relative_path(tmp_path: Path):
@@ -72,3 +73,35 @@ def test_load_config_supports_utf8_bom_and_bool_flags(tmp_path: Path, monkeypatc
 
     assert cfg.CHECK_ZIP_MAP_SAME_PREFIX is False
     assert cfg.CHECK_MAP_FILENAME_FORMAT is False
+
+
+def test_validate_config_rejects_invalid_identifier(tmp_path: Path):
+    cfg_path = tmp_path / "config-invalid-id.json"
+    cfg_path.write_text(
+        json.dumps(
+            {
+                "WATCH_DIR": str(tmp_path / "watch"),
+                "TARGET_DIR": str(tmp_path / "target"),
+                "LOG_DIR": str(tmp_path / "logs"),
+                "DB_TABLE": "zip-record",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    os.environ["NASSYNC_CONFIG"] = str(cfg_path)
+    cfg = load_config()
+
+    with pytest.raises(SystemExit):
+        validate_config(cfg)
+
+
+def test_initial_scan_state_read_write(tmp_path: Path):
+    state_file = tmp_path / "scan-state.json"
+    state = InitialScanState(state_file)
+    watch_dir = tmp_path / "A"
+
+    assert state.get_last_scan_ts(watch_dir) == 0.0
+    state.update_last_scan_ts(watch_dir, 123.45)
+    state2 = InitialScanState(state_file)
+    assert state2.get_last_scan_ts(watch_dir) == pytest.approx(123.45)

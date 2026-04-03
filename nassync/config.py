@@ -1,9 +1,12 @@
-import json
+﻿import json
 import os
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote, urlparse
+
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 @dataclass(frozen=True)
@@ -132,6 +135,10 @@ def is_nas_path(path: Path) -> bool:
     )
 
 
+def _is_valid_identifier(value: str) -> bool:
+    return isinstance(value, str) and bool(_IDENTIFIER_RE.fullmatch(value.strip()))
+
+
 def load_config() -> Config:
     default_cfg = Config()
     cfg_path = Path(os.getenv("NASSYNC_CONFIG", _app_base_dir() / "config.json"))
@@ -219,7 +226,6 @@ def validate_config(cfg: Config, sync_types_raw=None):
         if path.exists() and not path.is_dir():
             report(f"{name} 不是目录: {path}")
 
-    # 目录暂时不可用时允许启动，运行期由重试机制恢复。
     check_dir("WATCH_DIR", cfg.WATCH_DIR, must_exist=False)
     check_dir("TARGET_DIR", cfg.TARGET_DIR, must_exist=False)
     check_dir("LOG_DIR", cfg.LOG_DIR, must_exist=False)
@@ -269,6 +275,11 @@ def validate_config(cfg: Config, sync_types_raw=None):
     ]:
         check_non_empty(key, getattr(cfg, key))
 
+    for key in ["DB_SCHEMA", "DB_TABLE", "DB_TASK_TABLE"]:
+        value = getattr(cfg, key)
+        if not _is_valid_identifier(value):
+            report(f"{key} 只能包含字母、数字、下划线，且不能以数字开头: {value}")
+
     if sync_types_raw is not None:
         if not isinstance(sync_types_raw, list):
             report("SYNC_TYPES 必须是字符串数组（可为空）")
@@ -284,4 +295,3 @@ def validate_config(cfg: Config, sync_types_raw=None):
         for err in errors:
             print(f"  - {err}")
         raise SystemExit(1)
-

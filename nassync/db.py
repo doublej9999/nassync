@@ -20,6 +20,7 @@ class PgClient:
 
     def __init__(self, cfg: Config):
         self.cfg = cfg
+        self._validate_sql_identifiers()
         self.pool = None
         self._pool_lock = threading.Lock()
         self._connect_failures = 0
@@ -30,6 +31,22 @@ class PgClient:
         self._map_cache_lock = threading.Lock()
         self._map_config_cache = []
         self._map_config_cache_expire_at = 0.0
+
+    def _validate_sql_identifiers(self):
+        identifiers = {
+            "DB_SCHEMA": self.cfg.DB_SCHEMA,
+            "DB_TABLE": self.cfg.DB_TABLE,
+            "DB_TASK_TABLE": self.cfg.DB_TASK_TABLE,
+            "MAP_PATH_TABLE": self.MAP_PATH_TABLE,
+        }
+        for name, value in identifiers.items():
+            raw = str(value or "").strip()
+            if not raw:
+                raise ValueError(f"{name} 不能为空")
+            if not (raw[0].isalpha() or raw[0] == "_"):
+                raise ValueError(f"{name} 非法（需以字母或下划线开头）: {value}")
+            if not all(ch.isalnum() or ch == "_" for ch in raw):
+                raise ValueError(f"{name} 非法（仅允许字母/数字/下划线）: {value}")
 
     def _new_pool(self):
         return pool.SimpleConnectionPool(
