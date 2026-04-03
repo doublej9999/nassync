@@ -3,7 +3,7 @@
 一个用于 **NAS 目录自动监听** 的小工具：
 
 - 监听 `A` 目录下新增/变更的 `.zip` 文件
-- 支持在页面维护 `map_path_config`（`WATCH_DIR`/`TARGET_DIR`/`SYNC_TYPES`）
+- 支持在页面维护 `map_path_config`（`WATCH_DIR`/`TARGET_DIR`/`SYNC_TYPES`/`FILE_SUFFIXES`）
 - 校验 ZIP 内 `.MAP` 文件名并提取 LOT/WAFER
 - 提取 `LOT/WAFER` 信息写入 PostgreSQL
 - 将 ZIP 从 `WATCH_DIR` 搬运到 `TARGET_DIR` 后再入库
@@ -33,14 +33,19 @@ nassync/
 
 - `TYPE`：业务类型（如 `BP`、`CD`、`FBP`）
 - 含 `BACKUP` 的路径会被跳过
-- 非 `.zip` 文件会被跳过
+- 若命中 `map_path_config` 且未配置 `FILE_SUFFIXES`，则后缀不限
+- 若配置了 `FILE_SUFFIXES`，仅处理匹配后缀（如 `.zip,.tar`，大小写不敏感）
 
-### 2.2 文件规则
+### 2.2 文件规则（按后缀区分）
 
-- ZIP 内仅处理 `.MAP` 文件
-- `.MAP` 文件名必须匹配：`XXXXXX-XX`（6 位 lot + 2 位 wafer）
-- `.MAP` 文件名前缀必须与 ZIP 文件名前缀一致
-  - 例如：`G39S14.zip` 中应包含 `G39S14-01.MAP`
+- 当文件后缀为 `.zip` 时：
+  - ZIP 内仅处理 `.MAP` 文件
+  - `.MAP` 文件名必须匹配：`XXXXXX-XX`（6 位 lot + 2 位 wafer）
+  - `.MAP` 文件名前缀必须与 ZIP 文件名前缀一致
+    - 例如：`G39S14.zip` 中应包含 `G39S14-01.MAP`
+- 当文件后缀不是 `.zip`（如 `.tar`）时：
+  - 仅搬运与备份，不做解包/入 `zip_record`
+  - 任务状态仍会记录在 `zip_task_status`
 
 ### 2.3 成功后的动作
 
@@ -102,6 +107,7 @@ pip install -r requirements.txt
   - `INITIAL_SCAN`（启动时是否扫描历史 ZIP）
 - Web 面板：`WEB_HOST`、`WEB_PORT`
 - 同步控制：`SYNC_TYPES` 作为回退配置；生产建议通过页面写入 `map_path_config.sync_types`
+- 后缀控制：生产建议通过页面写入 `map_path_config.file_suffixes`（留空=不限）
 
 示例（本地目录）：
 
@@ -135,8 +141,18 @@ pip install -r requirements.txt
   "WEB_PORT": 8080
 }
 
-`SYNC_TYPES` 为回退项。若 `map_path_config` 已配置，以表内的 `sync_types` 为准。
 ```
+
+`SYNC_TYPES` 为回退项。若 `map_path_config` 已配置，以表内配置为准（包括 `sync_types`、`file_suffixes`）。
+
+`map_path_config` 字段说明（页面配置）：
+
+- `sync_types`：业务类型（如 `BP`）
+- `watch_dir`：监听目录
+- `target_dir`：目标目录
+- `file_suffixes`：后缀过滤，逗号分隔（如 `.zip,.tar`）；留空表示不限
+- `is_feedback`：是否回传（回传任务跳过 `zip_record` 入库）
+- `enabled`：是否启用
 
 示例（NAS 目录）：
 

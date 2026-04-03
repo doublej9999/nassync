@@ -88,7 +88,9 @@ class DummyPg:
     def __init__(self):
         self.status_calls = []
 
-    def upsert_task_status(self, rec_type, zip_name, zip_path, status, error_msg=None, is_feedback=False):
+    def upsert_task_status(
+        self, rec_type, zip_name, zip_path, status, error_msg=None, is_feedback=False
+    ):
         self.status_calls.append(
             {
                 "type": rec_type,
@@ -102,6 +104,14 @@ class DummyPg:
 
     def insert_records(self, rec_type, lot_wafer_pairs, zip_name, zip_path):
         return None
+
+
+class RoutePg:
+    def __init__(self, route):
+        self.route = route
+
+    def match_map_path_config(self, _path):
+        return self.route
 
 
 class _TxConn:
@@ -207,6 +217,77 @@ def test_process_non_retryable_error_marks_failed(tmp_path: Path):
     assert statuses[-1] == "FAILED"
 
 
+def test_is_valid_uses_map_path_config_suffixes(tmp_path: Path):
+    watch_dir = tmp_path / "A" / "BP" / "WAFER_MAP"
+    target_dir = tmp_path / "B" / "BP" / "WAFER_MAP"
+    watch_dir.mkdir(parents=True, exist_ok=True)
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    cfg = Config(
+        WATCH_DIR=tmp_path / "A",
+        TARGET_DIR=tmp_path / "B",
+        LOG_DIR=tmp_path / "logs",
+    )
+    route = {
+        "sync_type": "BP_FROM_DB",
+        "watch_dir": str(watch_dir),
+        "target_dir": str(target_dir),
+        "file_suffixes": [".zip", ".tar"],
+    }
+    processor = Processor(cfg, pg=RoutePg(route=route))
+
+    assert processor.is_valid(watch_dir / "ABC123.zip") is True
+    assert processor.is_valid(watch_dir / "ABC123.tar") is True
+    assert processor.is_valid(watch_dir / "ABC123.rar") is False
+
+
+def test_is_valid_rejects_non_matching_map_path_config_suffix(tmp_path: Path):
+    watch_dir = tmp_path / "A" / "BP" / "WAFER_MAP"
+    target_dir = tmp_path / "B" / "BP" / "WAFER_MAP"
+    watch_dir.mkdir(parents=True, exist_ok=True)
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    cfg = Config(
+        WATCH_DIR=tmp_path / "A",
+        TARGET_DIR=tmp_path / "B",
+        LOG_DIR=tmp_path / "logs",
+    )
+    route = {
+        "sync_type": "BP_FROM_DB",
+        "watch_dir": str(watch_dir),
+        "target_dir": str(target_dir),
+        "file_suffixes": [".zip"],
+    }
+    processor = Processor(cfg, pg=RoutePg(route=route))
+
+    assert processor.is_valid(watch_dir / "ABC123.ZIP") is True
+    assert processor.is_valid(watch_dir / "ABC123.tar") is False
+
+
+def test_is_valid_allows_any_suffix_when_map_path_config_suffixes_empty(tmp_path: Path):
+    watch_dir = tmp_path / "A" / "BP" / "WAFER_MAP"
+    target_dir = tmp_path / "B" / "BP" / "WAFER_MAP"
+    watch_dir.mkdir(parents=True, exist_ok=True)
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    cfg = Config(
+        WATCH_DIR=tmp_path / "A",
+        TARGET_DIR=tmp_path / "B",
+        LOG_DIR=tmp_path / "logs",
+    )
+    route = {
+        "sync_type": "BP_FROM_DB",
+        "watch_dir": str(watch_dir),
+        "target_dir": str(target_dir),
+        "file_suffixes": [],
+    }
+    processor = Processor(cfg, pg=RoutePg(route=route))
+
+    assert processor.is_valid(watch_dir / "ABC123.zip") is True
+    assert processor.is_valid(watch_dir / "ABC123.tar") is True
+    assert processor.is_valid(watch_dir / "ABC123.7z") is True
+
+
 def test_process_moves_zip_and_uses_type_from_map_path_config(tmp_path: Path):
     watch_dir = tmp_path / "A" / "BP" / "WAFER_MAP"
     target_dir = tmp_path / "B" / "BP" / "WAFER_MAP"
@@ -244,6 +325,43 @@ def test_process_moves_zip_and_uses_type_from_map_path_config(tmp_path: Path):
     assert pg.insert_calls[0]["rec_type"] == "BP_FROM_DB"
     assert pg.insert_calls[0]["conn_is_same"] is True
     assert pg.conn.commits == 1
+    assert pg.conn.rollbacks == 0
+
+
+def test_process_non_zip_moves_only_and_skips_insert(tmp_path: Path):
+    watch_dir = tmp_path / "A" / "BP" / "WAFER_MAP"
+    target_dir = tmp_path / "B" / "BP" / "WAFER_MAP"
+    watch_dir.mkdir(parents=True, exist_ok=True)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    tar_path = watch_dir / "ABC123.tar"
+    tar_path.write_bytes(b"tar-data")
+
+    cfg = Config(
+        WATCH_DIR=tmp_path / "A",
+        TARGET_DIR=tmp_path / "B",
+        LOG_DIR=tmp_path / "logs",
+        FILE_STABLE_CHECK_TIMES=1,
+        FILE_STABLE_CHECK_INTERVAL_SEC=0.01,
+    )
+    route = {
+        "sync_type": "BP_FROM_DB",
+        "watch_dir": str(watch_dir),
+        "target_dir": str(target_dir),
+        "file_suffixes": [".zip", ".tar"],
+    }
+    pg = TxPg(route=route, fail_insert=False)
+    processor = Processor(cfg, pg=pg)
+
+    ok = processor._process(tar_path)
+
+    assert ok is True
+    assert tar_path.exists() is False
+    moved_tar = target_dir / "ABC123.tar"
+    assert moved_tar.exists() is True
+    backup_tar = watch_dir / "BACKUP" / "ABC123.tar"
+    assert backup_tar.exists() is True
+    assert len(pg.insert_calls) == 0
+    assert pg.conn.commits == 0
     assert pg.conn.rollbacks == 0
 
 

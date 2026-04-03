@@ -234,12 +234,19 @@ class PgClient:
                             sync_types VARCHAR(50) NOT NULL,
                             watch_dir VARCHAR(1000) NOT NULL,
                             target_dir VARCHAR(1000) NOT NULL,
+                            file_suffixes VARCHAR(500) NOT NULL DEFAULT '',
                             is_feedback BOOLEAN NOT NULL DEFAULT FALSE,
                             enabled BOOLEAN NOT NULL DEFAULT TRUE,
                             created_at TIMESTAMP NOT NULL DEFAULT NOW(),
                             updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
                             CONSTRAINT uq_map_path_config_watch UNIQUE (watch_dir)
                         )
+                        """
+                    )
+                    cur.execute(
+                        f"""
+                        ALTER TABLE {self.MAP_PATH_TABLE}
+                        ADD COLUMN IF NOT EXISTS file_suffixes VARCHAR(500) NOT NULL DEFAULT ''
                         """
                     )
                     cur.execute(
@@ -270,6 +277,37 @@ class PgClient:
     @staticmethod
     def _normalize_sync_type(sync_types: str) -> str:
         return (sync_types or "").strip().upper()
+
+    @staticmethod
+    def _normalize_file_suffixes(file_suffixes) -> list[str]:
+        if file_suffixes is None:
+            return []
+        if isinstance(file_suffixes, str):
+            raw_items = file_suffixes.split(",")
+        elif isinstance(file_suffixes, (list, tuple, set)):
+            raw_items = list(file_suffixes)
+        else:
+            return []
+
+        normalized = []
+        seen = set()
+        for item in raw_items:
+            if not isinstance(item, str):
+                continue
+            value = item.strip().lower()
+            if not value:
+                continue
+            if not value.startswith("."):
+                value = f".{value}"
+            if value in seen:
+                continue
+            seen.add(value)
+            normalized.append(value)
+        return normalized
+
+    @classmethod
+    def _serialize_file_suffixes(cls, file_suffixes) -> str:
+        return ",".join(cls._normalize_file_suffixes(file_suffixes))
 
     @staticmethod
     def _normalize_stats_scope(scope) -> str:
@@ -334,7 +372,7 @@ class PgClient:
             with conn.cursor() as cur:
                 cur.execute(
                     f"""
-                    SELECT id, sync_types, watch_dir, target_dir, is_feedback, enabled, created_at, updated_at
+                    SELECT id, sync_types, watch_dir, target_dir, file_suffixes, is_feedback, enabled, created_at, updated_at
                     FROM {self.MAP_PATH_TABLE}
                     ORDER BY sync_types, watch_dir
                     """
@@ -349,10 +387,11 @@ class PgClient:
                     "sync_types": row[1],
                     "watch_dir": row[2],
                     "target_dir": row[3],
-                    "is_feedback": bool(row[4]),
-                    "enabled": bool(row[5]),
-                    "created_at": row[6].strftime("%Y-%m-%d %H:%M:%S") if row[6] else None,
-                    "updated_at": row[7].strftime("%Y-%m-%d %H:%M:%S") if row[7] else None,
+                    "file_suffixes": self._normalize_file_suffixes(row[4]),
+                    "is_feedback": bool(row[5]),
+                    "enabled": bool(row[6]),
+                    "created_at": row[7].strftime("%Y-%m-%d %H:%M:%S") if row[7] else None,
+                    "updated_at": row[8].strftime("%Y-%m-%d %H:%M:%S") if row[8] else None,
                 }
             )
         return data
@@ -361,7 +400,7 @@ class PgClient:
         return self._get_map_path_configs_cached(only_enabled=only_enabled)
 
     def create_map_path_config(
-        self, sync_types, watch_dir, target_dir, enabled=True, is_feedback=False
+        self, sync_types, watch_dir, target_dir, enabled=True, is_feedback=False, file_suffixes=None
     ):
         normalized_sync_types = self._normalize_sync_type(sync_types)
         if not normalized_sync_types:
@@ -369,6 +408,7 @@ class PgClient:
 
         normalized_watch = str(Path(watch_dir))
         normalized_target = str(Path(target_dir))
+        normalized_suffixes = self._serialize_file_suffixes(file_suffixes)
 
         self._ensure_map_path_config_table()
         with self._transaction() as conn:
@@ -376,13 +416,14 @@ class PgClient:
                 cur.execute(
                     f"""
                     INSERT INTO {self.MAP_PATH_TABLE}
-                    (sync_types, watch_dir, target_dir, is_feedback, enabled, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, NOW())
+                    (sync_types, watch_dir, target_dir, file_suffixes, is_feedback, enabled, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, NOW())
                     """,
                     (
                         normalized_sync_types,
                         normalized_watch,
                         normalized_target,
+                        normalized_suffixes,
                         bool(is_feedback),
                         bool(enabled),
                     ),
@@ -397,6 +438,7 @@ class PgClient:
         target_dir,
         enabled=True,
         is_feedback=False,
+        file_suffixes=None,
     ):
         normalized_sync_types = self._normalize_sync_type(sync_types)
         if not normalized_sync_types:
@@ -404,6 +446,7 @@ class PgClient:
 
         normalized_watch = str(Path(watch_dir))
         normalized_target = str(Path(target_dir))
+        normalized_suffixes = self._serialize_file_suffixes(file_suffixes)
 
         self._ensure_map_path_config_table()
         with self._transaction() as conn:
@@ -414,6 +457,7 @@ class PgClient:
                     SET sync_types = %s,
                         watch_dir = %s,
                         target_dir = %s,
+                        file_suffixes = %s,
                         is_feedback = %s,
                         enabled = %s,
                         updated_at = NOW()
@@ -423,6 +467,7 @@ class PgClient:
                         normalized_sync_types,
                         normalized_watch,
                         normalized_target,
+                        normalized_suffixes,
                         bool(is_feedback),
                         bool(enabled),
                         int(config_id),
@@ -433,7 +478,7 @@ class PgClient:
         self._invalidate_map_path_cache()
 
     def upsert_map_path_config(
-        self, sync_types, watch_dir, target_dir, enabled=True, is_feedback=False
+        self, sync_types, watch_dir, target_dir, enabled=True, is_feedback=False, file_suffixes=None
     ):
         # 兼容旧调用：按 watch_dir 幂等写入
         normalized_watch = str(Path(watch_dir))
@@ -450,9 +495,10 @@ class PgClient:
                 target_dir,
                 enabled,
                 is_feedback,
+                file_suffixes,
             )
         return self.create_map_path_config(
-            sync_types, watch_dir, target_dir, enabled, is_feedback
+            sync_types, watch_dir, target_dir, enabled, is_feedback, file_suffixes
         )
 
     def delete_map_path_config(self, config_id):
@@ -505,6 +551,7 @@ class PgClient:
                     "watch_dir_path": Path(item["watch_dir"]),
                     "target_dir_path": Path(item["target_dir"]),
                     "sync_type": self._normalize_sync_type(item["sync_types"]),
+                    "file_suffixes": self._normalize_file_suffixes(item.get("file_suffixes")),
                     "is_feedback": bool(item.get("is_feedback")),
                 }
                 matched_len = length

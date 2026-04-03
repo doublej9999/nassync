@@ -209,6 +209,7 @@ def create_dashboard_handler(pg: PgClient, lifecycle: ServiceLifecycle, cfg: Con
                 target_dir_raw = payload.get("target_dir")
                 enabled = payload.get("enabled", True)
                 is_feedback = payload.get("is_feedback", False)
+                file_suffixes = payload.get("file_suffixes")
                 config_id = payload.get("id")
 
                 if not sync_types:
@@ -236,6 +237,7 @@ def create_dashboard_handler(pg: PgClient, lifecycle: ServiceLifecycle, cfg: Con
                             target_dir=str(target_dir),
                             enabled=bool(enabled),
                             is_feedback=bool(is_feedback),
+                            file_suffixes=file_suffixes,
                         )
                     else:
                         pg.update_map_path_config(
@@ -245,6 +247,7 @@ def create_dashboard_handler(pg: PgClient, lifecycle: ServiceLifecycle, cfg: Con
                             target_dir=str(target_dir),
                             enabled=bool(enabled),
                             is_feedback=bool(is_feedback),
+                            file_suffixes=file_suffixes,
                         )
                     lifecycle.request_reload()
                     rows = pg.get_map_path_configs(only_enabled=False)
