@@ -1,73 +1,107 @@
 ﻿# NAS Sync（ZIP 解包 + MAP 入库 + 监控面板）
 
-一个用于 **NAS 目录自动监听** 的小工具：
+一个用于 **NAS 目录自动监听** 的小工具，支持高可用单活接管与持久化任务队列：
 
-- 监听 `A` 目录下新增/变更的 `.zip` 文件
+- 监听 `WATCH_DIR` 下新增/变更文件（支持 `.zip`、`.tar` 等后缀过滤）
 - 支持在页面维护 `map_path_config`（`WATCH_DIR`/`TARGET_DIR`/`SYNC_TYPES`/`FILE_SUFFIXES`/`LAST_SCAN`）
-- 校验 ZIP 内 `.MAP` 文件名并提取 LOT/WAFER
-- 提取 `LOT/WAFER` 信息写入 PostgreSQL
-- 将 ZIP 从 `WATCH_DIR` 搬运到 `TARGET_DIR` 后再入库
+- ZIP 内校验 `.MAP` 文件名并提取 `LOT/WAFER`
+- 将记录写入 PostgreSQL（`zip_record` / `zip_task_status`）
 - 提供 Web 监控页面查看任务状态与入库记录
+- 支持 **leader/standby 单活租约**（自动接管）
+- 支持 **DB 持久化任务队列**（进程重启后可继续处理）
 
 ## 1. 项目结构
 
 ```text
 nassync/
-├─ main.py                # 主程序（监听、处理、入库、Web 面板）
+├─ main.py                # 启动入口
 ├─ ddl.sql                # PostgreSQL 建表脚本
-├─ nassync.spec           # PyInstaller 打包配置
-├─ A/                     # 监听源目录（示例）
-├─ B/                     # MAP 目标目录（示例）
-└─ logs/                  # 运行日志输出目录
+├─ config.example.json    # 配置模板
+├─ nassync/
+│  ├─ app.py              # 主循环（租约、监听、Web）
+│  ├─ workers.py          # 任务队列与工作线程
+│  ├─ processor.py        # 文件处理主逻辑
+│  ├─ db.py               # 数据库访问与 HA 能力
+│  ├─ watcher.py          # 监听器与生命周期
+│  └─ dashboard.py        # Web 面板与 API
+└─ tests/                 # pytest 用例
 ```
 
 ## 2. 处理规则
 
 ### 2.1 目录规则
 
-仅处理满足以下路径规则的 ZIP：
+默认仅处理满足以下路径规则的 ZIP：
 
 ```text
 {WATCH_DIR}/{TYPE}/WAFER_MAP/*.zip
 ```
 
-- `TYPE`：业务类型（如 `BP`、`CD`、`FBP`）
-- 含 `BACKUP` 的路径会被跳过
-- 若命中 `map_path_config` 且未配置 `FILE_SUFFIXES`，则后缀不限
-- 若配置了 `FILE_SUFFIXES`，仅处理匹配后缀（如 `.zip,.tar`，大小写不敏感）
+同时支持通过 `map_path_config` 动态配置监听目录与目标目录。
+
+- 路径包含 `BACKUP` 会跳过
+- 命中 `map_path_config` 且未配置 `file_suffixes` 时，后缀不限
+- 配置 `file_suffixes` 时，仅处理匹配后缀（如 `.zip,.tar`）
 
 ### 2.2 文件规则（按后缀区分）
 
-- 当文件后缀为 `.zip` 时：
-  - ZIP 内仅处理 `.MAP` 文件
-  - `.MAP` 文件名必须匹配：`XXXXXX-XX`（6 位 lot + 2 位 wafer）
-  - `.MAP` 文件名前缀必须与 ZIP 文件名前缀一致
-    - 例如：`G39S14.zip` 中应包含 `G39S14-01.MAP`
-- 当文件后缀不是 `.zip`（如 `.tar`）时：
-  - 仅搬运与备份，不做解包/入 `zip_record`
-  - 任务状态仍会记录在 `zip_task_status`
+- `.zip` 文件：
+  - 仅处理 ZIP 内 `.MAP`
+  - `.MAP` 文件名格式：`XXXXXX-XX`（6 位 lot + 2 位 wafer）
+  - `.MAP` 前缀需与 ZIP 文件名前缀一致（可通过配置关闭）
+- 非 `.zip` 文件（如 `.tar`）：
+  - 仅搬运 + 备份，不写入 `zip_record`
+  - 任务状态仍记录到 `zip_task_status`
 
-### 2.3 成功后的动作
+### 2.3 成功动作
 
-1. 抽取并复制 `.MAP` 到：`{TARGET_DIR}/{TYPE}/WAFER_MAP/`
-2. 向 `zip_record` 写入去重记录（唯一键：`type + lot_id + wafer_id`）
-3. 搬运前先复制一份 ZIP 到 `WATCH_DIR/BACKUP`（若目录不存在自动创建）
-4. 将 ZIP 从 `WATCH_DIR` 搬运到 `TARGET_DIR`
-5. 写入 `zip_record`/`zip_task_status`
-6. 失败时回滚数据库事务，并回滚 ZIP 搬运（不会解压 MAP 文件）
+1. 复制源文件到 `BACKUP` 目录
+2. 将文件搬运到目标目录
+3. 若为 ZIP：提取 LOT/WAFER 并写入 `zip_record`
+4. 更新 `zip_task_status`
+5. 处理成功后推进 `map_path_config.last_scan`（按 `GREATEST` 推进）
 
-## 3. 数据库初始化
+## 3. 高可用能力
 
-本项目使用 PostgreSQL，先执行：
+### 3.1 单活租约（Leader/Standby）
+
+- 使用 `service_lease` 表实现单活
+- 只有 `leader` 实例启动目录监听
+- `standby` 实例持续续租竞争，leader 故障后自动接管
+- `/healthz` 返回当前角色 `role=leader|standby`
+
+### 3.2 持久化任务队列
+
+- 使用 `zip_task_queue` 表持久化任务
+- 事件入队先写 DB，再由 worker 认领执行
+- 任务状态机：`PENDING/RUNNING/RETRYING/SUCCESS/FAILED/SKIPPED`
+- 可重试任务使用 `next_retry_at` 延迟重试
+
+### 3.3 健康检查与运行指标
+
+`GET /healthz` 返回：
+
+- `status` / `watcher` / `web` / `db`
+- `role`
+- `queue_depth`
+- `retrying_count`
+- `oldest_pending_sec`
+- `db_connect_failures`
+
+## 4. 数据库初始化
+
+先执行：
 
 ```sql
--- 在目标库中执行
 \i ddl.sql
 ```
 
-或手动执行 `ddl.sql` 中的建表语句（包含 `zip_record`、`zip_task_status`、`map_path_config` 三张表）。
+核心表：
 
-## 4. 环境依赖
+- 业务表：`zip_record`、`zip_task_status`、`map_path_config`
+- HA 表：`service_lease`、`zip_task_queue`
+
+## 5. 环境依赖
 
 推荐 Python 3.10+。
 
@@ -75,42 +109,38 @@ nassync/
 pip install -r requirements.txt
 ```
 
-> 如果你使用源码中的 `psycopg2`（非 binary 包），请确保本机已安装 PostgreSQL 对应的编译依赖。
+## 6. 配置说明
 
-## 5. 配置说明
+配置加载优先级：
 
-程序支持**外置 JSON 配置**，默认按以下优先级读取：
-
-1. 环境变量 `NASSYNC_CONFIG` 指向的配置文件
+1. 环境变量 `NASSYNC_CONFIG` 指定文件
 2. 程序目录下 `config.json`
-3. 若都不存在，则回退到内置默认值
+3. 内置默认值
 
-建议做法：
+建议：复制 `config.example.json` 为 `config.json` 后修改。
 
-1. 复制 `config.example.json` 为 `config.json`
-2. 修改目录、数据库与端口配置
-3. 重启程序生效
+### 6.1 核心配置
 
-核心配置项：
-
-- 目录配置：`WATCH_DIR`、`TARGET_DIR`
-  - 支持本地路径（如 `D:\\A`）
-  - 支持 NAS UNC 路径（如 `\\\\NAS01\\fab\\A`）
-  - 支持 SMB URL（如 `smb://nas01/fab/A`，程序会自动转为 UNC）
-  - 当 `WATCH_DIR` 为 NAS 路径时，监听器会自动切换为轮询模式（`PollingObserver`）
-- 数据库配置：`DB_HOST`、`DB_PORT`、`DB_NAME`、`DB_SCHEMA`、`DB_USER`、`DB_PASSWORD`
-  - 支持环境变量 `NASSYNC_DB_PASSWORD` 覆盖 `config.json` 中的 `DB_PASSWORD`
-- 运行参数：
-  - `FILE_STABLE_CHECK_TIMES` / `FILE_STABLE_CHECK_INTERVAL_SEC`
+- 目录：`WATCH_DIR`、`TARGET_DIR`
+- 数据库：`DB_HOST`、`DB_PORT`、`DB_NAME`、`DB_SCHEMA`、`DB_USER`、`DB_PASSWORD`
+- 运行：
+  - `FILE_STABLE_CHECK_TIMES`
   - `PROCESS_RETRY_TIMES` / `PROCESS_RETRY_INTERVAL_SEC` / `PROCESS_RETRY_BACKOFF_MAX_SEC`
   - `TASK_QUEUE_MAX_SIZE` / `EVENT_DEDUP_WINDOW_SEC` / `DASHBOARD_CACHE_TTL_SEC`
-  - `INITIAL_SCAN`（启动时是否执行增量扫描）
-- Web 面板：`WEB_HOST`、`WEB_PORT`
-- 同步控制：`SYNC_TYPES` 作为回退配置；生产建议通过页面写入 `map_path_config.sync_types`
-- 后缀控制：生产建议通过页面写入 `map_path_config.file_suffixes`（留空=不限）
-- 增量扫描游标：由 `map_path_config.last_scan` 持久化（不再使用本地 JSON 状态文件）
+  - `INITIAL_SCAN`
+- Web：`WEB_HOST`、`WEB_PORT`
 
-示例（本地目录）：
+### 6.2 高可用配置（新增）
+
+- `USE_PERSISTENT_QUEUE`：是否启用 DB 持久化任务队列（建议 `true`）
+- `TASK_FETCH_BATCH_SIZE`：worker 每次从 DB 拉取任务数
+- `TASK_LOCK_SEC`：任务认领锁超时时间（秒）
+- `SERVICE_NAME`：租约服务名（同一服务实例需一致）
+- `INSTANCE_ID`：实例 ID（留空则自动生成）
+- `LEASE_DURATION_SEC`：租约时长（秒）
+- `LEASE_RENEW_INTERVAL_SEC`：续租间隔（秒，必须小于租约时长）
+
+### 6.3 配置示例
 
 ```json
 {
@@ -125,10 +155,6 @@ pip install -r requirements.txt
   "DB_TABLE": "zip_record",
   "DB_TASK_TABLE": "zip_task_status",
   "LOG_DIR": ".\\logs",
-  "SYNC_TYPES": [
-    "BP",
-    "CD"
-  ],
   "FILE_STABLE_CHECK_TIMES": 3,
   "FILE_STABLE_CHECK_INTERVAL_SEC": 2.0,
   "PROCESS_RETRY_TIMES": 3,
@@ -138,90 +164,40 @@ pip install -r requirements.txt
   "EVENT_DEDUP_WINDOW_SEC": 1.0,
   "DASHBOARD_CACHE_TTL_SEC": 2.0,
   "INITIAL_SCAN": true,
+  "USE_PERSISTENT_QUEUE": true,
+  "TASK_FETCH_BATCH_SIZE": 20,
+  "TASK_LOCK_SEC": 120,
+  "SERVICE_NAME": "nassync-watcher",
+  "INSTANCE_ID": "",
+  "LEASE_DURATION_SEC": 30,
+  "LEASE_RENEW_INTERVAL_SEC": 10,
   "WEB_HOST": "0.0.0.0",
   "WEB_PORT": 8080
 }
-
 ```
 
-`SYNC_TYPES` 为回退项。若 `map_path_config` 已配置，以表内配置为准（包括 `sync_types`、`file_suffixes`）。
+## 7. 启动方式
 
-`map_path_config` 字段说明（页面配置）：
-
-- `sync_types`：业务类型（如 `BP`）
-- `watch_dir`：监听目录
-- `target_dir`：目标目录
-- `file_suffixes`：后缀过滤，逗号分隔（如 `.zip,.tar`）；留空表示不限
-- `last_scan`：增量扫描上次游标（UNIX 时间戳，秒）
-- `is_feedback`：是否回传（回传任务跳过 `zip_record` 入库）
-- `enabled`：是否启用
-
-示例（NAS 目录）：
-
-```json
-{
-  "WATCH_DIR": "\\\\NAS01\\fab\\A",
-  "TARGET_DIR": "smb://nas01/fab/B"
-}
-```
-
-建议将数据库密码通过环境变量传入：
-
-```bash
-set NASSYNC_DB_PASSWORD=your_password
-python main.py
-```
-
-## 6. 启动方式
-
-### 6.1 直接运行
+### 7.1 直接运行
 
 ```bash
 python main.py
 ```
 
-启动后会同时运行：
+启动后会运行：
 
-- 文件监听服务（watchdog）
+- 文件监听服务（仅 leader 实例）
+- worker 处理线程
 - Web 监控服务（默认 `http://0.0.0.0:8080/dashboard`）
 
-### 6.2 一键打包（Windows + Linux）
+### 7.2 双实例部署建议
 
-项目根目录已提供 `build_all.ps1`，可一次性产出：
+- 两个实例使用同一套数据库
+- `SERVICE_NAME` 保持一致
+- `INSTANCE_ID` 设置为不同值（或留空自动生成）
+- 同时启动后自动形成 leader/standby
 
-- `dist/windows/nassync.exe`
-- `dist/linux/nassync`
-
-执行命令：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\build_all.ps1
-```
-
-说明：
-
-- Windows 包：本机 Python 虚拟环境构建
-- Linux 包：通过 Docker 镜像 `python:3.11-bullseye` 构建
-- 脚本会自动复制 `config.example.json` 到对应产物目录的 `config.json`
-
-可选参数：
-
-```powershell
-# 仅打 Windows
-powershell -ExecutionPolicy Bypass -File .\build_all.ps1 -SkipLinux
-
-# 仅打 Linux
-powershell -ExecutionPolicy Bypass -File .\build_all.ps1 -SkipWindows
-```
-
-如果配置文件不在可执行文件同目录，可用环境变量指定：
-
-```bash
-set NASSYNC_CONFIG=D:\deploy\nassync\config.json
-dist\windows\nassync.exe
-```
-
-## 7. Web 监控接口
+## 8. Web 接口
 
 - 页面：`/dashboard`（含“统计页面 / 监控页面 / 配置页面”三个页签）
 - 数据接口：`/api/dashboard`
@@ -230,53 +206,37 @@ dist\windows\nassync.exe
   - `GET /api/map-path-config`
   - `POST /api/map-path-config`
   - `POST /api/map-path-config/delete`
+- 健康检查：`GET /healthz`
 
-接口支持分页与关键词筛选参数：
+## 9. 日志与排错
 
-- 任务：`task_page`、`task_page_size`、`task_q`
-- 记录：`record_page`、`record_page_size`、`record_q`
+- 日志目录：`logs/watcher.log`（按天滚动，保留 30 天）
+- 常见故障：
+  - 文件上传未完成（不稳定）
+  - ZIP/MAP 前缀不一致
+  - MAP 文件名格式错误
+  - 数据库短暂不可用
 
 `/api/dashboard` 额外返回：
 
 - `runtime`：运行期指标（事件总数、去抖跳过数、队列丢弃数、任务成功/失败/重试数、平均/最大耗时、队列深度）
 - `health`：服务健康快照（`status`、`watcher`、`web`、`db`、`db_error`）
-
-## 8. 日志与排错
-
-- 日志目录：`logs/watcher.log`（按天滚动，保留 30 天）
-- 增量扫描游标存储：数据库 `map_path_config.last_scan`
-- 常见失败原因：
-  - 文件上传未完成导致“不稳定”
-  - ZIP 与 MAP 前缀不一致
-  - MAP 文件名格式不符合 `XXXXXX-XX`
-  - 数据库连接失败
-
-建议优先查看：
+建议优先看：
 
 1. `logs/watcher.log`
 2. `zip_task_status.error_msg`
-
-## 9. 快速验证
-
-1. 创建目录：`A/<TYPE>/WAFER_MAP`
-2. 投放一个测试 ZIP（含合法命名 `.MAP` 文件）
-3. 观察：
-   - ZIP 被移动到 `B/<TYPE>/WAFER_MAP`（或你在页面配置的 `TARGET_DIR`）
-   - MAP 出现在 `B/<TYPE>/WAFER_MAP`
-   - 数据库两张表有对应记录
-   - `/dashboard` 展示任务状态
+3. `/healthz` 指标（尤其 `queue_depth`、`retrying_count`）
 
 ## 10. 自动化测试
-
-已提供基础 `pytest` 用例，覆盖：
-
-- ZIP 中 MAP 提取与目标目录写入
-- 空 MAP ZIP 的失败判定
-- 路径合法性校验与重试退避计算
-
-运行方式：
 
 ```bash
 pip install -r requirements.txt
 pytest -q
 ```
+
+当前基础测试覆盖：
+
+- 监听去重与生命周期
+- ZIP 处理与回滚
+- 配置路径解析
+- worker 重试与异常恢复

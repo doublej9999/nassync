@@ -80,7 +80,9 @@ class ServiceLifecycle:
     def __init__(self, handler: Handler, observer: Observer = None):
         self.handler = handler
         self._observer_lock = threading.Lock()
+        self._role_lock = threading.Lock()
         self.observer = None
+        self._role = "standby"
         if observer is not None:
             self.set_observer(observer)
         self._web_running = threading.Event()
@@ -114,6 +116,20 @@ class ServiceLifecycle:
     def get_observer(self):
         with self._observer_lock:
             return self.observer
+
+    def set_role(self, role: str):
+        value = str(role or "").strip().lower()
+        if value not in {"leader", "standby"}:
+            value = "standby"
+        with self._role_lock:
+            self._role = value
+
+    def get_role(self):
+        with self._role_lock:
+            return self._role
+
+    def is_leader(self):
+        return self.get_role() == "leader"
 
     def watcher_healthy(self):
         observer = self.get_observer()

@@ -49,6 +49,9 @@ def main():
         processor,
         max_queue_size=cfg.TASK_QUEUE_MAX_SIZE,
         runtime_metrics=runtime_metrics,
+        pg=pg,
+        persistent_queue=cfg.USE_PERSISTENT_QUEUE,
+        worker_id_prefix=cfg.INSTANCE_ID,
     )
 
     handler = Handler(
@@ -57,8 +60,11 @@ def main():
         runtime_metrics=runtime_metrics,
     )
     lifecycle = ServiceLifecycle(handler)
+    lifecycle.set_role("standby")
     watch_retry_interval = max(1.0, float(cfg.PROCESS_RETRY_INTERVAL_SEC))
     last_watch_attempt_at = 0.0
+    lease_renew_interval = max(1, int(cfg.LEASE_RENEW_INTERVAL_SEC))
+    last_lease_check_at = 0.0
 
     scanned_watch_dirs = set()
     current_watch_key = tuple()
@@ -97,8 +103,6 @@ def main():
             last_scan_ts = 0.0
 
         scheduled_count = 0
-        newest_mtime = last_scan_ts
-
         for f in watch_dir.rglob("*.zip"):
             if not f.is_file():
                 continue
@@ -106,22 +110,10 @@ def main():
                 mtime = float(f.stat().st_mtime)
             except Exception:
                 continue
-            newest_mtime = max(newest_mtime, mtime)
             if mtime <= last_scan_ts:
                 continue
-            handler._handle_event(f)
+            worker_pool.enqueue(f)
             scheduled_count += 1
-
-        next_scan_ts = max(time.time(), newest_mtime)
-        try:
-            pg.update_map_path_last_scan(watch_dir, next_scan_ts)
-        except Exception as ex:
-            logger.warning(
-                "更新 last_scan 失败：%s -> %.3f, err=%s",
-                watch_dir,
-                next_scan_ts,
-                summarize_error_msg(ex),
-            )
 
         scanned_watch_dirs.add(key)
         logger.info(
@@ -133,6 +125,19 @@ def main():
 
     def ensure_observer_running(force=False):
         nonlocal last_watch_attempt_at, current_watch_key
+
+        if not lifecycle.is_leader():
+            observer = lifecycle.get_observer()
+            if observer is not None and observer.is_alive():
+                try:
+                    observer.stop()
+                    observer.join(timeout=1)
+                except Exception:
+                    pass
+                lifecycle.set_observer(None)
+                current_watch_key = tuple()
+                logger.info("当前为 standby，已停止目录监听")
+            return
 
         observer = lifecycle.get_observer()
         reload_requested = lifecycle.consume_reload_request()
@@ -194,6 +199,30 @@ def main():
                 summarize_error_msg(ex),
             )
 
+    def refresh_leader_role(force=False):
+        nonlocal last_lease_check_at
+        now = time.monotonic()
+        if not force and (now - last_lease_check_at) < lease_renew_interval:
+            return
+        last_lease_check_at = now
+
+        try:
+            is_leader = pg.try_acquire_or_renew_lease(
+                cfg.SERVICE_NAME,
+                cfg.INSTANCE_ID,
+                cfg.LEASE_DURATION_SEC,
+            )
+        except Exception as ex:
+            logger.warning("续约失败，保持 standby：%s", summarize_error_msg(ex))
+            is_leader = False
+
+        prev = lifecycle.get_role()
+        lifecycle.set_role("leader" if is_leader else "standby")
+        cur = lifecycle.get_role()
+        if cur != prev:
+            logger.info("实例角色切换：%s -> %s（instance=%s）", prev, cur, cfg.INSTANCE_ID)
+
+    refresh_leader_role(force=True)
     ensure_observer_running(force=True)
 
     web_server = ThreadingHTTPServer(
@@ -251,6 +280,7 @@ def main():
     try:
         while True:
             time.sleep(1)
+            refresh_leader_role()
             ensure_observer_running()
     except KeyboardInterrupt:
         stop_reason = "收到键盘中断"

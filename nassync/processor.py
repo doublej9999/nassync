@@ -125,12 +125,24 @@ class Processor:
             )
             if self.runtime_metrics is not None:
                 self.runtime_metrics.on_task_success(time.monotonic() - started_at)
+            if self.pg is not None and hasattr(self.pg, "mark_task_skipped"):
+                try:
+                    self.pg.mark_task_skipped(path, reason="不符合规则或未匹配 map_path_config")
+                except Exception:
+                    logger.debug("标记任务 SKIPPED 失败：%s", path)
             return None
 
         trace_id = uuid.uuid4().hex[:12]
         rec_type = route["rec_type"]
         is_feedback = bool(route.get("is_feedback"))
+        watch_dir = Path(route["watch_dir"])
         key = str(path)
+        event_mtime = time.time()
+        try:
+            if path.exists():
+                event_mtime = float(path.stat().st_mtime)
+        except Exception:
+            pass
         log_fields = {
             "trace_id": trace_id,
             "zip_path": key,
@@ -153,6 +165,8 @@ class Processor:
 
             for attempt in range(max_attempts):
                 try:
+                    if hasattr(self.pg, "mark_task_running"):
+                        self.pg.mark_task_running(path)
                     self.pg.upsert_task_status(
                         rec_type,
                         path.name,
@@ -170,6 +184,10 @@ class Processor:
                     )
                     if self.runtime_metrics is not None:
                         self.runtime_metrics.on_task_success(time.monotonic() - started_at)
+                    if hasattr(self.pg, "mark_task_success"):
+                        self.pg.mark_task_success(path)
+                    if hasattr(self.pg, "advance_map_path_last_scan"):
+                        self.pg.advance_map_path_last_scan(watch_dir, event_mtime)
                     return None
                 except Exception as ex:
                     last_error = ex
@@ -195,6 +213,8 @@ class Processor:
                         )
                         if self.runtime_metrics is not None:
                             self.runtime_metrics.on_task_failed(time.monotonic() - started_at)
+                        if hasattr(self.pg, "mark_task_retry"):
+                            self.pg.mark_task_retry(path, deferred_delay, ex)
                         return deferred_delay
 
                     self._log_with_fields(
@@ -228,6 +248,8 @@ class Processor:
                 )
                 if self.runtime_metrics is not None:
                     self.runtime_metrics.on_task_failed(time.monotonic() - started_at)
+                if hasattr(self.pg, "mark_task_retry"):
+                    self.pg.mark_task_retry(path, deferred_delay, ex)
                 return deferred_delay
 
             self._mark_failed(
@@ -258,6 +280,8 @@ class Processor:
             return
         try:
             self.pg.upsert_task_status(rec_type, path.name, str(path), "FAILED", reason, is_feedback=is_feedback)
+            if hasattr(self.pg, "mark_task_failed"):
+                self.pg.mark_task_failed(path, reason)
         except Exception as ex:
             self._log_with_fields(
                 logging.ERROR,

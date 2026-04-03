@@ -106,10 +106,12 @@ def create_dashboard_handler(
                         queue_depth = int(worker_pool.queue.qsize())
                     except Exception:
                         queue_depth = None
-
+                role = lifecycle.get_role() if hasattr(lifecycle, "get_role") else "unknown"
+                runtime_db_metrics = pg.get_runtime_metrics() if hasattr(pg, "get_runtime_metrics") else {}
                 overall_ok = db_ok and watcher_state == "running" and web_state == "running"
                 payload = {
                     "status": "ok" if overall_ok else "degraded",
+                    "role": role,
                     "watcher": watcher_state,
                     "web": web_state,
                     "db": "ok" if db_ok else "error",
@@ -117,6 +119,7 @@ def create_dashboard_handler(
                     "queue_depth": queue_depth,
                     "shutting_down": lifecycle.is_shutting_down(),
                 }
+                payload.update(runtime_db_metrics or {})
                 self._send_json(payload)
                 return
 

@@ -1,6 +1,7 @@
 ﻿import json
 import os
 import re
+import socket
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -44,6 +45,16 @@ class Config:
     WEB_HOST: str = "0.0.0.0"
     WEB_PORT: int = 8080
     SYNC_TYPES: tuple[str, ...] = tuple()
+
+    # 高可用参数
+    USE_PERSISTENT_QUEUE: bool = True
+    TASK_FETCH_BATCH_SIZE: int = 20
+    TASK_LOCK_SEC: int = 120
+
+    SERVICE_NAME: str = "nassync-watcher"
+    INSTANCE_ID: str = ""
+    LEASE_DURATION_SEC: int = 30
+    LEASE_RENEW_INTERVAL_SEC: int = 10
 
 
 def _app_base_dir() -> Path:
@@ -198,8 +209,17 @@ def load_config() -> Config:
     merged["CHECK_ZIP_MAP_SAME_PREFIX"] = _to_bool(merged["CHECK_ZIP_MAP_SAME_PREFIX"])
     merged["CHECK_MAP_FILENAME_FORMAT"] = _to_bool(merged["CHECK_MAP_FILENAME_FORMAT"])
     merged["INITIAL_SCAN"] = _to_bool(merged["INITIAL_SCAN"])
+    merged["USE_PERSISTENT_QUEUE"] = _to_bool(merged["USE_PERSISTENT_QUEUE"])
     merged["WEB_PORT"] = int(merged["WEB_PORT"])
     merged["SYNC_TYPES"] = _normalize_sync_types(sync_types_raw)
+    merged["TASK_FETCH_BATCH_SIZE"] = int(merged["TASK_FETCH_BATCH_SIZE"])
+    merged["TASK_LOCK_SEC"] = int(merged["TASK_LOCK_SEC"])
+    merged["LEASE_DURATION_SEC"] = int(merged["LEASE_DURATION_SEC"])
+    merged["LEASE_RENEW_INTERVAL_SEC"] = int(merged["LEASE_RENEW_INTERVAL_SEC"])
+    merged["SERVICE_NAME"] = str(merged["SERVICE_NAME"]).strip()
+    merged["INSTANCE_ID"] = str(merged["INSTANCE_ID"]).strip()
+    if not merged["INSTANCE_ID"]:
+        merged["INSTANCE_ID"] = f"{socket.gethostname()}-{os.getpid()}"
 
     if config_loaded:
         print(f"[配置] 已加载配置文件: {cfg_path}")
@@ -260,6 +280,21 @@ def validate_config(cfg: Config, sync_types_raw=None):
     if cfg.DASHBOARD_CACHE_TTL_SEC < 0:
         report("DASHBOARD_CACHE_TTL_SEC 不能为负数")
 
+    if cfg.TASK_FETCH_BATCH_SIZE < 1:
+        report("TASK_FETCH_BATCH_SIZE 必须大于 0")
+
+    if cfg.TASK_LOCK_SEC < 1:
+        report("TASK_LOCK_SEC 必须大于 0")
+
+    if cfg.LEASE_DURATION_SEC < 5:
+        report("LEASE_DURATION_SEC 必须大于等于 5")
+
+    if cfg.LEASE_RENEW_INTERVAL_SEC < 1:
+        report("LEASE_RENEW_INTERVAL_SEC 必须大于 0")
+
+    if cfg.LEASE_RENEW_INTERVAL_SEC >= cfg.LEASE_DURATION_SEC:
+        report("LEASE_RENEW_INTERVAL_SEC 必须小于 LEASE_DURATION_SEC")
+
     def check_non_empty(name: str, value: str):
         if not isinstance(value, str) or not value.strip():
             report(f"{name} 不能为空")
@@ -272,6 +307,8 @@ def validate_config(cfg: Config, sync_types_raw=None):
         "DB_TASK_TABLE",
         "DB_SCHEMA",
         "WEB_HOST",
+        "SERVICE_NAME",
+        "INSTANCE_ID",
     ]:
         check_non_empty(key, getattr(cfg, key))
 
@@ -295,3 +332,5 @@ def validate_config(cfg: Config, sync_types_raw=None):
         for err in errors:
             print(f"  - {err}")
         raise SystemExit(1)
+
+
