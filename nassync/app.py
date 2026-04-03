@@ -12,6 +12,7 @@ from .dashboard import create_dashboard_handler
 from .db import PgClient
 from .errors import summarize_error_msg
 from .logging_utils import setup_logging
+from .observability import RuntimeMetrics
 from .processor import Processor
 from .watcher import Handler, ServiceLifecycle
 from .workers import TaskWorkerPool
@@ -37,15 +38,24 @@ def main():
     setup_logging(cfg)
 
     pg = PgClient(cfg)
+    runtime_metrics = RuntimeMetrics()
     try:
         pg.ensure_default_map_path_config()
     except Exception as ex:
         logger.warning("初始化 map_path_config 默认配置失败：%s", summarize_error_msg(ex))
 
-    processor = Processor(cfg, pg)
-    worker_pool = TaskWorkerPool(processor, max_queue_size=cfg.TASK_QUEUE_MAX_SIZE)
+    processor = Processor(cfg, pg, runtime_metrics=runtime_metrics)
+    worker_pool = TaskWorkerPool(
+        processor,
+        max_queue_size=cfg.TASK_QUEUE_MAX_SIZE,
+        runtime_metrics=runtime_metrics,
+    )
 
-    handler = Handler(worker_pool, dedup_window_sec=cfg.EVENT_DEDUP_WINDOW_SEC)
+    handler = Handler(
+        worker_pool,
+        dedup_window_sec=cfg.EVENT_DEDUP_WINDOW_SEC,
+        runtime_metrics=runtime_metrics,
+    )
     lifecycle = ServiceLifecycle(handler)
     watch_retry_interval = max(1.0, float(cfg.PROCESS_RETRY_INTERVAL_SEC))
     last_watch_attempt_at = 0.0
@@ -188,7 +198,13 @@ def main():
 
     web_server = ThreadingHTTPServer(
         (cfg.WEB_HOST, cfg.WEB_PORT),
-        create_dashboard_handler(pg, lifecycle, cfg),
+        create_dashboard_handler(
+            pg,
+            lifecycle,
+            cfg,
+            runtime_metrics=runtime_metrics,
+            worker_pool=worker_pool,
+        ),
     )
     lifecycle.mark_web_started()
     web_thread = threading.Thread(target=web_server.serve_forever, daemon=True)

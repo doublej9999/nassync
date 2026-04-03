@@ -20,9 +20,10 @@ logger = logging.getLogger("watcher")
 class Processor:
     _MAP_NAME_PATTERN = re.compile(r"^([A-Za-z0-9]{6})-([A-Za-z0-9]{2})$")
 
-    def __init__(self, cfg: Config, pg):
+    def __init__(self, cfg: Config, pg, runtime_metrics=None):
         self.cfg = cfg
         self.pg = pg
+        self.runtime_metrics = runtime_metrics
         self.processing = set()
         self.lock = threading.Lock()
         self.sync_types = set(cfg.SYNC_TYPES)
@@ -111,6 +112,10 @@ class Processor:
         return False
 
     def process(self, path: Path):
+        started_at = time.monotonic()
+        if self.runtime_metrics is not None:
+            self.runtime_metrics.on_task_started()
+
         route = self._resolve_route(path)
         if not route:
             self._log_with_fields(
@@ -118,6 +123,8 @@ class Processor:
                 "跳过：不符合规则或未匹配 map_path_config",
                 zip_path=str(path),
             )
+            if self.runtime_metrics is not None:
+                self.runtime_metrics.on_task_success(time.monotonic() - started_at)
             return None
 
         trace_id = uuid.uuid4().hex[:12]
@@ -161,6 +168,8 @@ class Processor:
                         "SUCCESS",
                         is_feedback=is_feedback,
                     )
+                    if self.runtime_metrics is not None:
+                        self.runtime_metrics.on_task_success(time.monotonic() - started_at)
                     return None
                 except Exception as ex:
                     last_error = ex
@@ -184,6 +193,8 @@ class Processor:
                             f"处理失败（可恢复），将延迟重入队列 {deferred_delay:.2f}s: {summarize_error_msg(ex)}",
                             **log_fields,
                         )
+                        if self.runtime_metrics is not None:
+                            self.runtime_metrics.on_task_failed(time.monotonic() - started_at)
                         return deferred_delay
 
                     self._log_with_fields(
@@ -199,6 +210,8 @@ class Processor:
                 else "处理失败（未知错误）"
             )
             self._mark_failed(rec_type, path, failure_reason, is_feedback=is_feedback, trace_id=trace_id)
+            if self.runtime_metrics is not None:
+                self.runtime_metrics.on_task_failed(time.monotonic() - started_at)
             return None
         except Exception as ex:
             self._log_with_fields(
@@ -213,6 +226,8 @@ class Processor:
                     f"处理失败（外层可恢复），将延迟重入队列 {deferred_delay:.2f}s",
                     **log_fields,
                 )
+                if self.runtime_metrics is not None:
+                    self.runtime_metrics.on_task_failed(time.monotonic() - started_at)
                 return deferred_delay
 
             self._mark_failed(
@@ -222,6 +237,8 @@ class Processor:
                 is_feedback=is_feedback,
                 trace_id=trace_id,
             )
+            if self.runtime_metrics is not None:
+                self.runtime_metrics.on_task_failed(time.monotonic() - started_at)
             return None
         finally:
             with self.lock:

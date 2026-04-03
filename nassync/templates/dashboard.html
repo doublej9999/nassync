@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
@@ -15,7 +15,6 @@
       --err: #b91c1c;
       --border: #e5e7eb;
       --accent: #0f766e;
-      --accent-light: #e6fffa;
     }
     body { margin: 0; font-family: "Microsoft YaHei", "PingFang SC", sans-serif; background: var(--bg); color: var(--text); }
     .wrap { max-width: 1320px; margin: 0 auto; padding: 16px; }
@@ -57,7 +56,7 @@
     .pill { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; }
     .pill.feedback { background: #fef3c7; color: #92400e; }
     .pill.normal { background: #dcfce7; color: #166534; }
-    .meta { margin-top: 12px; color: var(--muted); font-size: 12px; display: flex; justify-content: space-between; }
+    .meta { margin-top: 12px; color: var(--muted); font-size: 12px; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
     .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
     .btn-danger { color: var(--err); }
     .cfg-enabled { white-space: nowrap; }
@@ -82,6 +81,7 @@
       <div class="topbar-title">NAS 文件同步监控</div>
       <div class="nav">
         <button id="nav_stats" class="nav-btn" type="button" data-page="stats">统计页面</button>
+        <button id="nav_monitor" class="nav-btn" type="button" data-page="monitor">监控页面</button>
         <button id="nav_config" class="nav-btn" type="button" data-page="config">配置页面</button>
       </div>
     </div>
@@ -156,15 +156,38 @@
       </div>
     </div>
 
+    <div id="page_monitor" class="page">
+      <div class="sub">运行期监控指标与服务健康状态</div>
+      <div class="section">
+        <h2>运行期可观测指标</h2>
+        <div class="grid">
+          <div class="card"><div class="label">队列深度</div><div id="rt_queue_depth" class="value">-</div></div>
+          <div class="card"><div class="label">事件总数</div><div id="rt_events_total" class="value">-</div></div>
+          <div class="card"><div class="label">去重跳过总数</div><div id="rt_dedup_total" class="value">-</div></div>
+          <div class="card"><div class="label">队列丢弃总数</div><div id="rt_queue_drop_total" class="value warn">-</div></div>
+          <div class="card"><div class="label">任务启动总数</div><div id="rt_started_total" class="value">-</div></div>
+          <div class="card"><div class="label">任务成功总数</div><div id="rt_success_total" class="value ok">-</div></div>
+          <div class="card"><div class="label">任务失败总数</div><div id="rt_failed_total" class="value err">-</div></div>
+          <div class="card"><div class="label">任务重试总数</div><div id="rt_retry_total" class="value warn">-</div></div>
+          <div class="card"><div class="label">平均耗时（秒）</div><div id="rt_avg_sec" class="value">-</div></div>
+          <div class="card"><div class="label">最大耗时（秒）</div><div id="rt_max_sec" class="value">-</div></div>
+        </div>
+        <div class="meta">
+          <span id="health_status">健康状态=-</span>
+          <span id="health_detail">监听器=- Web=- 数据库=- 队列=-</span>
+        </div>
+      </div>
+    </div>
+
     <div id="page_config" class="page">
       <div class="sub">管理监听目录与目标目录映射</div>
       <div class="section">
         <div class="section-head">
-          <h2>来料路径配置（map_path_config）</h2>
+          <h2>路径配置（map_path_config）</h2>
           <button id="cfg_add_btn" class="btn-primary" type="button">新增配置</button>
         </div>
         <table>
-          <thead><tr><th>ID</th><th>SYNC_TYPES</th><th>WATCH_DIR</th><th>TARGET_DIR</th><th>是否回传</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead>
+          <thead><tr><th>ID</th><th>SYNC_TYPES</th><th>后缀</th><th>WATCH_DIR</th><th>TARGET_DIR</th><th>是否回传</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead>
           <tbody id="cfg_tbody"></tbody>
         </table>
       </div>
@@ -173,13 +196,13 @@
 
   <div id="cfg_add_modal" class="modal-mask">
     <div class="modal-card">
-      <div id="cfg_add_modal_title" class="modal-title">新增来料路径配置</div>
+      <div id="cfg_add_modal_title" class="modal-title">新增路径配置</div>
       <div class="modal-grid">
         <input id="add_id" type="hidden" value="">
         <label for="add_sync_types">SYNC_TYPES</label>
         <input id="add_sync_types" type="text" placeholder="例如 BP" value="">
         <label for="add_file_suffixes">FILE_SUFFIXES</label>
-        <input id="add_file_suffixes" type="text" placeholder="e.g. .zip,.tar (empty = no limit)" value="">
+        <input id="add_file_suffixes" type="text" placeholder="如 .zip,.tar（留空表示不限）" value="">
         <label for="add_watch_dir">WATCH_DIR</label>
         <input id="add_watch_dir" type="text" placeholder="" value="">
         <label for="add_target_dir">TARGET_DIR</label>
@@ -191,7 +214,7 @@
       </div>
       <div class="modal-actions">
         <button id="cfg_add_cancel_btn" type="button">取消</button>
-        <button id="cfg_add_save_btn" class="btn-primary" type="button">确认新增</button>
+        <button id="cfg_add_save_btn" class="btn-primary" type="button">确认保存</button>
       </div>
     </div>
   </div>
@@ -218,7 +241,7 @@
 
     function esc(v) {
       if (v === null || v === undefined) return '';
-      return String(v).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+      return String(v).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
     }
 
     async function fetchJson(url, options) {
@@ -250,7 +273,7 @@
         </tr>
       `).join('');
       if (!state.configs.length) {
-        tbody.innerHTML = '<tr><td colspan="8" class="muted">暂无配置，请先新增。</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9">暂无配置，请先新增。</td></tr>';
       }
     }
 
@@ -304,7 +327,7 @@
       document.getElementById('add_target_dir').value = item.target_dir || '';
       document.getElementById('add_enabled').checked = Boolean(item.enabled);
       document.getElementById('add_is_feedback').checked = Boolean(item.is_feedback);
-      document.getElementById('cfg_add_modal_title').textContent = '编辑来料路径配置';
+      document.getElementById('cfg_add_modal_title').textContent = '编辑路径配置';
       document.getElementById('cfg_add_save_btn').textContent = '确认更新';
       document.getElementById('cfg_add_modal').classList.add('show');
     }
@@ -317,8 +340,8 @@
       document.getElementById('add_target_dir').value = '';
       document.getElementById('add_enabled').checked = true;
       document.getElementById('add_is_feedback').checked = false;
-      document.getElementById('cfg_add_modal_title').textContent = '新增来料路径配置';
-      document.getElementById('cfg_add_save_btn').textContent = '确认新增';
+      document.getElementById('cfg_add_modal_title').textContent = '新增路径配置';
+      document.getElementById('cfg_add_save_btn').textContent = '确认保存';
     }
 
     async function removeConfig(id) {
@@ -344,20 +367,32 @@
       const data = await fetchJson('/api/dashboard?' + params.toString());
       state.statsScope = data.scope === 'feedback' ? 'feedback' : 'normal';
       updateScopeUI();
-      const s = data.summary || {};
 
+      const s = data.summary || {};
       document.getElementById('total_tasks').textContent = s.total_tasks ?? 0;
       document.getElementById('pending_tasks').textContent = s.pending_tasks ?? 0;
       document.getElementById('success_tasks').textContent = s.success_tasks ?? 0;
       document.getElementById('failed_tasks').textContent = s.failed_tasks ?? 0;
       document.getElementById('total_records').textContent = s.total_records ?? 0;
 
+      const runtime = data.runtime || {};
+      document.getElementById('rt_queue_depth').textContent = runtime.queue_depth ?? '-';
+      document.getElementById('rt_events_total').textContent = runtime.events_received_total ?? 0;
+      document.getElementById('rt_dedup_total').textContent = runtime.events_dedup_skipped_total ?? 0;
+      document.getElementById('rt_queue_drop_total').textContent = runtime.queue_full_drop_total ?? 0;
+      document.getElementById('rt_started_total').textContent = runtime.tasks_started_total ?? 0;
+      document.getElementById('rt_success_total').textContent = runtime.tasks_success_total ?? 0;
+      document.getElementById('rt_failed_total').textContent = runtime.tasks_failed_total ?? 0;
+      document.getElementById('rt_retry_total').textContent = runtime.tasks_retry_scheduled_total ?? 0;
+      document.getElementById('rt_avg_sec').textContent = runtime.task_duration_avg_sec ?? 0;
+      document.getElementById('rt_max_sec').textContent = runtime.task_duration_max_sec ?? 0;
+
+      const health = data.health || {};
+      document.getElementById('health_status').textContent = `health=${health.status || '-'}`;
+      document.getElementById('health_detail').textContent = `watcher=${health.watcher || '-'} web=${health.web || '-'} db=${health.db || '-'} queue=${runtime.queue_depth ?? '-'}`;
+
       document.getElementById('type_tbody').innerHTML = (data.by_type || []).map(x => `
-        <tr>
-          <td>${esc(x.type)}</td>
-          <td>${esc(x.task_count)}</td>
-          <td>${esc(x.last_update || '-')}</td>
-        </tr>
+        <tr><td>${esc(x.type)}</td><td>${esc(x.task_count)}</td><td>${esc(x.last_update || '-')}</td></tr>
       `).join('');
 
       const taskData = data.recent_tasks || {};
@@ -417,11 +452,7 @@
       document.getElementById('cfg_add_btn').addEventListener('click', openAddModal);
       document.getElementById('cfg_add_cancel_btn').addEventListener('click', closeAddModal);
       document.getElementById('cfg_add_save_btn').addEventListener('click', async () => {
-        try {
-          await saveNewConfig();
-        } catch (e) {
-          alert(e.message || '新增失败');
-        }
+        try { await saveNewConfig(); } catch (e) { alert(e.message || '保存失败'); }
       });
 
       document.getElementById('task_search_btn').addEventListener('click', () => {
@@ -430,23 +461,17 @@
         state.task.page = 1;
         tick();
       });
-      taskQ.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') document.getElementById('task_search_btn').click();
-      });
+      taskQ.addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('task_search_btn').click(); });
       taskPageSize.addEventListener('change', () => {
         state.task.page_size = Number(taskPageSize.value) || 10;
         state.task.page = 1;
         tick();
       });
       document.getElementById('task_prev_btn').addEventListener('click', () => {
-        if (state.task.page > 1) {
-          state.task.page -= 1;
-          tick();
-        }
+        if (state.task.page > 1) { state.task.page -= 1; tick(); }
       });
       document.getElementById('task_next_btn').addEventListener('click', () => {
-        state.task.page += 1;
-        tick();
+        state.task.page += 1; tick();
       });
 
       document.getElementById('record_search_btn').addEventListener('click', () => {
@@ -455,23 +480,17 @@
         state.record.page = 1;
         tick();
       });
-      recordQ.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') document.getElementById('record_search_btn').click();
-      });
+      recordQ.addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('record_search_btn').click(); });
       recordPageSize.addEventListener('change', () => {
         state.record.page_size = Number(recordPageSize.value) || 10;
         state.record.page = 1;
         tick();
       });
       document.getElementById('record_prev_btn').addEventListener('click', () => {
-        if (state.record.page > 1) {
-          state.record.page -= 1;
-          tick();
-        }
+        if (state.record.page > 1) { state.record.page -= 1; tick(); }
       });
       document.getElementById('record_next_btn').addEventListener('click', () => {
-        state.record.page += 1;
-        tick();
+        state.record.page += 1; tick();
       });
 
       document.getElementById('stats_scope_toggle_btn').addEventListener('click', () => {
@@ -496,12 +515,14 @@
     }
 
     function switchPage(page, updateHash) {
-      const nextPage = page === 'config' ? 'config' : 'stats';
+      const nextPage = ['stats', 'monitor', 'config'].includes(page) ? page : 'stats';
       state.currentPage = nextPage;
 
       document.getElementById('page_stats').classList.toggle('active', nextPage === 'stats');
+      document.getElementById('page_monitor').classList.toggle('active', nextPage === 'monitor');
       document.getElementById('page_config').classList.toggle('active', nextPage === 'config');
       document.getElementById('nav_stats').classList.toggle('active', nextPage === 'stats');
+      document.getElementById('nav_monitor').classList.toggle('active', nextPage === 'monitor');
       document.getElementById('nav_config').classList.toggle('active', nextPage === 'config');
 
       if (updateHash) {

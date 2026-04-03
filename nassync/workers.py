@@ -17,11 +17,13 @@ class TaskWorkerPool:
         processor,
         worker_count=DEFAULT_WORKER_COUNT,
         max_queue_size=None,
+        runtime_metrics=None,
     ):
         self.processor = processor
         self.worker_count = worker_count
         queue_size = max_queue_size or processor.cfg.TASK_QUEUE_MAX_SIZE
         self.queue = queue.Queue(maxsize=max(1, int(queue_size)))
+        self.runtime_metrics = runtime_metrics or getattr(processor, "runtime_metrics", None)
         self._stop_event = threading.Event()
         self._queued_paths = set()
         self._queue_lock = threading.Lock()
@@ -38,6 +40,8 @@ class TaskWorkerPool:
             daemon=True,
         )
         self._retry_thread.start()
+        if self.runtime_metrics is not None:
+            self.runtime_metrics.set_queue_depth_provider(self.queue.qsize)
 
         for idx in range(worker_count):
             worker = threading.Thread(
@@ -63,10 +67,14 @@ class TaskWorkerPool:
 
         try:
             self.queue.put_nowait(target)
+            if self.runtime_metrics is not None:
+                self.runtime_metrics.on_queue_enqueued()
         except queue.Full:
             with self._queue_lock:
                 self._queued_paths.discard(key)
             logger.warning("任务队列已满，忽略文件：%s", target)
+            if self.runtime_metrics is not None:
+                self.runtime_metrics.on_queue_full_drop()
 
     def _run_worker(self):
         while True:
@@ -85,6 +93,8 @@ class TaskWorkerPool:
                 retry_delay = self.processor.process(path)
                 if retry_delay is not None:
                     self._schedule_retry(path, retry_delay)
+                    if self.runtime_metrics is not None:
+                        self.runtime_metrics.on_task_retry_scheduled()
             except Exception:
                 logger.exception("Worker 处理时遇到未捕获异常：%s", path)
             finally:

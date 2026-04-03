@@ -13,10 +13,17 @@ _DEFAULT_DEDUP_MAX_ENTRIES = 5000
 
 
 class Handler(FileSystemEventHandler):
-    def __init__(self, worker_pool, dedup_window_sec=1.0, dedup_max_entries=_DEFAULT_DEDUP_MAX_ENTRIES):
+    def __init__(
+        self,
+        worker_pool,
+        dedup_window_sec=1.0,
+        dedup_max_entries=_DEFAULT_DEDUP_MAX_ENTRIES,
+        runtime_metrics=None,
+    ):
         self.worker_pool = worker_pool
         self._dedup_window_sec = max(0.0, float(dedup_window_sec))
         self._dedup_max_entries = max(100, int(dedup_max_entries))
+        self.runtime_metrics = runtime_metrics
         self._event_lock = threading.Lock()
         self._last_event_ts: OrderedDict[str, float] = OrderedDict()
         self._active = threading.Event()
@@ -29,6 +36,9 @@ class Handler(FileSystemEventHandler):
         self._active.clear()
 
     def _handle_event(self, path: Path):
+        if self.runtime_metrics is not None:
+            self.runtime_metrics.on_event_received()
+
         if not self.is_active():
             logger.info("监听器已停用，忽略事件：%s", path)
             return
@@ -40,6 +50,8 @@ class Handler(FileSystemEventHandler):
                 last_ts = self._last_event_ts.get(key)
                 if last_ts is not None and (ts - last_ts) < self._dedup_window_sec:
                     logger.debug("事件去抖跳过：%s", path)
+                    if self.runtime_metrics is not None:
+                        self.runtime_metrics.on_event_dedup_skipped()
                     return
             # Move to end (most recent) and update timestamp
             self._last_event_ts[key] = ts

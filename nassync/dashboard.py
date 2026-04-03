@@ -32,7 +32,13 @@ def _load_dashboard_html() -> str:
 DASHBOARD_HTML = _load_dashboard_html()
 
 
-def create_dashboard_handler(pg: PgClient, lifecycle: ServiceLifecycle, cfg: Config):
+def create_dashboard_handler(
+    pg: PgClient,
+    lifecycle: ServiceLifecycle,
+    cfg: Config,
+    runtime_metrics=None,
+    worker_pool=None,
+):
     cache_lock = threading.Lock()
     cache_ttl_sec = max(0.0, float(cfg.DASHBOARD_CACHE_TTL_SEC))
     cache_key = None
@@ -94,12 +100,21 @@ def create_dashboard_handler(pg: PgClient, lifecycle: ServiceLifecycle, cfg: Con
                 watcher_state = "running" if lifecycle.watcher_healthy() else "stopped"
                 web_state = "running" if lifecycle.web_healthy() else "stopped"
                 db_ok, db_msg = pg.check_health()
+                queue_depth = None
+                if worker_pool is not None and getattr(worker_pool, "queue", None) is not None:
+                    try:
+                        queue_depth = int(worker_pool.queue.qsize())
+                    except Exception:
+                        queue_depth = None
+
+                overall_ok = db_ok and watcher_state == "running" and web_state == "running"
                 payload = {
-                    "status": "ok" if db_ok else "degraded",
+                    "status": "ok" if overall_ok else "degraded",
                     "watcher": watcher_state,
                     "web": web_state,
                     "db": "ok" if db_ok else "error",
                     "db_error": db_msg,
+                    "queue_depth": queue_depth,
                     "shutting_down": lifecycle.is_shutting_down(),
                 }
                 self._send_json(payload)
@@ -162,6 +177,29 @@ def create_dashboard_handler(pg: PgClient, lifecycle: ServiceLifecycle, cfg: Con
                         keyword=record_q,
                         scope=stats_scope,
                     )
+                    runtime_data = {}
+                    if runtime_metrics is not None and hasattr(runtime_metrics, "snapshot"):
+                        runtime_data = runtime_metrics.snapshot() or {}
+                    if "queue_depth" not in runtime_data:
+                        if worker_pool is not None and getattr(worker_pool, "queue", None) is not None:
+                            try:
+                                runtime_data["queue_depth"] = int(worker_pool.queue.qsize())
+                            except Exception:
+                                runtime_data["queue_depth"] = None
+                    data["runtime"] = runtime_data
+
+                    watcher_state = "running" if lifecycle.watcher_healthy() else "stopped"
+                    web_state = "running" if lifecycle.web_healthy() else "stopped"
+                    db_ok, db_msg = pg.check_health()
+                    overall_ok = db_ok and watcher_state == "running" and web_state == "running"
+                    data["health"] = {
+                        "status": "ok" if overall_ok else "degraded",
+                        "watcher": watcher_state,
+                        "web": web_state,
+                        "db": "ok" if db_ok else "error",
+                        "db_error": db_msg,
+                        "shutting_down": lifecycle.is_shutting_down(),
+                    }
                 except Exception as ex:
                     logger.warning("查询看板数据失败：%s", ex)
                     with cache_lock:

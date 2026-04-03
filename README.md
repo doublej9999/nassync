@@ -223,8 +223,9 @@ dist\windows\nassync.exe
 
 ## 7. Web 监控接口
 
-- 页面：`/dashboard`
+- 页面：`/dashboard`（含“统计页面 / 监控页面 / 配置页面”三个页签）
 - 数据接口：`/api/dashboard`
+- 健康检查：`/healthz`（返回 watcher/web/db 综合状态与队列深度）
 - 路径配置接口：
   - `GET /api/map-path-config`
   - `POST /api/map-path-config`
@@ -234,6 +235,11 @@ dist\windows\nassync.exe
 
 - 任务：`task_page`、`task_page_size`、`task_q`
 - 记录：`record_page`、`record_page_size`、`record_q`
+
+`/api/dashboard` 额外返回：
+
+- `runtime`：运行期指标（事件总数、去抖跳过数、队列丢弃数、任务成功/失败/重试数、平均/最大耗时、队列深度）
+- `health`：服务健康快照（`status`、`watcher`、`web`、`db`、`db_error`）
 
 ## 8. 日志与排错
 
