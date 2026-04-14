@@ -103,8 +103,10 @@ def main():
             last_scan_ts = 0.0
 
         scheduled_count = 0
-        for f in watch_dir.rglob("*.zip"):
+        for f in watch_dir.rglob("*"):
             if not f.is_file():
+                continue
+            if not processor.is_valid(f):
                 continue
             try:
                 mtime = float(f.stat().st_mtime)

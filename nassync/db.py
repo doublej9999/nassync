@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 import os
 import threading
 import time
@@ -1189,3 +1189,4 @@ class PgClient:
             self._reset_pool()
         except Exception as ex:
             logger.exception("关闭数据库连接池时出错：%s", ex)
+

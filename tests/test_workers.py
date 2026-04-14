@@ -16,6 +16,8 @@ from nassync.workers import TaskWorkerPool
 
 class FakeCfg:
     TASK_QUEUE_MAX_SIZE = 100
+    TASK_FETCH_BATCH_SIZE = 20
+    TASK_LOCK_SEC = 120
 
 
 class TrackingProcessor:
@@ -143,3 +145,98 @@ def test_worker_survives_uncaught_exception():
     pool.shutdown()
 
     assert call_count == 2
+
+
+def test_persistent_queue_claim_batch_processes_all_items():
+    class BatchCfg(FakeCfg):
+        TASK_FETCH_BATCH_SIZE = 3
+
+    class BatchProcessor:
+        cfg = BatchCfg()
+
+        def __init__(self):
+            self.processed = []
+
+        def process(self, path):
+            self.processed.append(path)
+            return None
+
+    class BatchPg:
+        def __init__(self):
+            self.calls = 0
+
+        def claim_due_tasks(self, worker_id, batch_size, lock_sec):
+            self.calls += 1
+            if self.calls == 1:
+                return [Path("/db/1.zip"), Path("/db/2.zip"), Path("/db/3.zip")]
+            return []
+
+    processor = BatchProcessor()
+    pg = BatchPg()
+    pool = TaskWorkerPool(
+        processor,
+        worker_count=1,
+        max_queue_size=10,
+        pg=pg,
+        persistent_queue=True,
+        worker_id_prefix="test",
+    )
+
+    deadline = time.time() + 3
+    while time.time() < deadline and len(processor.processed) < 3:
+        time.sleep(0.05)
+
+    pool.shutdown(wait=False)
+    assert processor.processed == [Path("/db/1.zip"), Path("/db/2.zip"), Path("/db/3.zip")]
+
+
+def test_persistent_queue_not_starved_by_memory_queue():
+    class FairCfg(FakeCfg):
+        TASK_FETCH_BATCH_SIZE = 2
+
+    class FairProcessor:
+        cfg = FairCfg()
+
+        def __init__(self):
+            self.processed = []
+
+        def process(self, path):
+            self.processed.append(path)
+            time.sleep(0.01)
+            return None
+
+    class FairPg:
+        def __init__(self):
+            self.claim_calls = 0
+
+        def enqueue_task(self, _path):
+            return None
+
+        def claim_due_tasks(self, worker_id, batch_size, lock_sec):
+            self.claim_calls += 1
+            if self.claim_calls == 1:
+                return [Path("/db/retry.zip")]
+            return []
+
+    processor = FairProcessor()
+    pg = FairPg()
+    pool = TaskWorkerPool(
+        processor,
+        worker_count=1,
+        max_queue_size=20,
+        pg=pg,
+        persistent_queue=True,
+        worker_id_prefix="test",
+    )
+
+    for i in range(6):
+        pool.enqueue(Path(f"/mem/{i}.zip"))
+
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        if Path("/db/retry.zip") in processor.processed:
+            break
+        time.sleep(0.05)
+
+    pool.shutdown(wait=False)
+    assert Path("/db/retry.zip") in processor.processed

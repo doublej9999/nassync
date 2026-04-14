@@ -27,6 +27,9 @@ class TaskWorkerPool:
         self.pg = pg
         self.persistent_queue = bool(persistent_queue and pg is not None)
         self.worker_id_prefix = str(worker_id_prefix or "worker")
+        claim_batch_size = getattr(processor.cfg, "TASK_FETCH_BATCH_SIZE", 20)
+        self._claim_batch_size = max(1, int(claim_batch_size))
+        self._memory_burst_before_claim = self._claim_batch_size
         queue_size = max_queue_size or processor.cfg.TASK_QUEUE_MAX_SIZE
         self.queue = queue.Queue(maxsize=max(1, int(queue_size)))
         self.runtime_metrics = runtime_metrics or getattr(processor, "runtime_metrics", None)
@@ -95,16 +98,29 @@ class TaskWorkerPool:
 
     def _run_worker(self):
         worker_name = threading.current_thread().name
+        memory_processed_since_claim = 0
         while True:
+            if (
+                self.persistent_queue
+                and memory_processed_since_claim >= self._memory_burst_before_claim
+            ):
+                claimed = self._claim_due_batch(worker_name)
+                if claimed:
+                    for claimed_path in claimed:
+                        self._process_path(claimed_path, from_queue=False)
+                memory_processed_since_claim = 0
+
             try:
-                path = self.queue.get(timeout=1)
+                path = self.queue.get(timeout=0.5 if self.persistent_queue else 1)
             except queue.Empty:
                 if self._stop_event.is_set():
                     break
                 if self.persistent_queue:
-                    claimed = self._claim_one(worker_name)
-                    if claimed is not None:
-                        self._process_path(claimed, from_queue=False)
+                    claimed = self._claim_due_batch(worker_name)
+                    if claimed:
+                        for claimed_path in claimed:
+                            self._process_path(claimed_path, from_queue=False)
+                        memory_processed_since_claim = 0
                 continue
 
             if path is None:
@@ -112,6 +128,7 @@ class TaskWorkerPool:
                 break
 
             self._process_path(path, from_queue=True)
+            memory_processed_since_claim += 1
 
     def _process_path(self, path: Path, from_queue: bool):
         try:
@@ -128,21 +145,21 @@ class TaskWorkerPool:
                     self._queued_paths.discard(str(path))
                 self.queue.task_done()
 
-    def _claim_one(self, worker_name: str):
+    def _claim_due_batch(self, worker_name: str):
         if not self.persistent_queue:
-            return None
+            return []
         try:
             items = self.pg.claim_due_tasks(
                 worker_id=f"{self.worker_id_prefix}:{worker_name}",
-                batch_size=self.processor.cfg.TASK_FETCH_BATCH_SIZE,
+                batch_size=self._claim_batch_size,
                 lock_sec=self.processor.cfg.TASK_LOCK_SEC,
             )
         except Exception:
             logger.exception("持久化队列拉取失败")
-            return None
+            return []
         if not items:
-            return None
-        return items[0]
+            return []
+        return items
 
     def _schedule_retry(self, path: Path, delay_sec):
         try:

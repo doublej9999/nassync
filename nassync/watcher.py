@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 import threading
 import time
 from collections import OrderedDict
@@ -49,7 +49,7 @@ class Handler(FileSystemEventHandler):
             if self._dedup_window_sec > 0:
                 last_ts = self._last_event_ts.get(key)
                 if last_ts is not None and (ts - last_ts) < self._dedup_window_sec:
-                    logger.debug("事件去抖跳过：%s", path)
+                    logger.debug("事件去重跳过：%s", path)
                     if self.runtime_metrics is not None:
                         self.runtime_metrics.on_event_dedup_skipped()
                     return
