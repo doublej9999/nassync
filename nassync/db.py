@@ -16,6 +16,8 @@ logger = logging.getLogger("watcher")
 
 
 class PgClient:
+    DB_TABLE = "zip_record"
+    DB_TASK_TABLE = "zip_task_status"
     MAP_PATH_TABLE = "map_path_config"
     SERVICE_LEASE_TABLE = "service_lease"
     TASK_QUEUE_TABLE = "zip_task_queue"
@@ -43,8 +45,8 @@ class PgClient:
     def _validate_sql_identifiers(self):
         identifiers = {
             "DB_SCHEMA": self.cfg.DB_SCHEMA,
-            "DB_TABLE": self.cfg.DB_TABLE,
-            "DB_TASK_TABLE": self.cfg.DB_TASK_TABLE,
+            "DB_TABLE": self.DB_TABLE,
+            "DB_TASK_TABLE": self.DB_TASK_TABLE,
             "MAP_PATH_TABLE": self.MAP_PATH_TABLE,
             "SERVICE_LEASE_TABLE": self.SERVICE_LEASE_TABLE,
             "TASK_QUEUE_TABLE": self.TASK_QUEUE_TABLE,
@@ -251,7 +253,7 @@ class PgClient:
 
     def _insert_records_with_cursor(self, cur, rec_type, lot_wafer_pairs, zip_name, zip_path):
         sql = f"""
-        INSERT INTO {self.cfg.DB_TABLE}
+        INSERT INTO {self.DB_TABLE}
         (type, lot_id, wafer_id, zip_name, zip_path)
         VALUES %s
         ON CONFLICT (type, lot_id, wafer_id) DO UPDATE SET
@@ -287,7 +289,7 @@ class PgClient:
             with conn.cursor() as cur:
                 self._assert_fencing_valid(cur)
                 sql = f"""
-                INSERT INTO {self.cfg.DB_TASK_TABLE}
+                INSERT INTO {self.DB_TASK_TABLE}
                 (type, zip_name, zip_path, status, error_msg, is_feedback, updated_at)
                 VALUES (%s,%s,%s,%s,%s,%s,NOW())
                 ON CONFLICT (zip_path) DO UPDATE SET
@@ -354,7 +356,7 @@ class PgClient:
                     # Ensure zip_task_status has is_feedback column for direct lookup
                     cur.execute(
                         f"""
-                        ALTER TABLE {self.cfg.DB_TASK_TABLE}
+                        ALTER TABLE {self.DB_TASK_TABLE}
                         ADD COLUMN IF NOT EXISTS is_feedback BOOLEAN NOT NULL DEFAULT FALSE
                         """
                     )
@@ -1235,7 +1237,7 @@ class PgClient:
                       COUNT(*) FILTER (WHERE status='PENDING') AS pending_tasks,
                       COUNT(*) FILTER (WHERE status='SUCCESS') AS success_tasks,
                       COUNT(*) FILTER (WHERE status='FAILED') AS failed_tasks
-                    FROM {self.cfg.DB_TASK_TABLE} t
+                    FROM {self.DB_TASK_TABLE} t
                     {task_scope_where}
                     """
                 )
@@ -1245,7 +1247,7 @@ class PgClient:
                 cur.execute(
                     f"""
                     SELECT COUNT(*)
-                    FROM {self.cfg.DB_TABLE} r
+                    FROM {self.DB_TABLE} r
                     {record_scope_where}
                     """
                 )
@@ -1256,7 +1258,7 @@ class PgClient:
                     SELECT type,
                            COUNT(*) AS task_count,
                            MAX(updated_at) AS last_update
-                    FROM {self.cfg.DB_TASK_TABLE} t
+                    FROM {self.DB_TASK_TABLE} t
                     {task_scope_where}
                     GROUP BY type
                     ORDER BY type
@@ -1318,7 +1320,7 @@ class PgClient:
                 cur.execute(
                     f"""
                     SELECT COUNT(*)
-                    FROM {self.cfg.DB_TASK_TABLE} t
+                    FROM {self.DB_TASK_TABLE} t
                     {where_sql}
                     """,
                     base_params,
@@ -1335,7 +1337,7 @@ class PgClient:
                       t.zip_path,
                       t.updated_at,
                       t.is_feedback
-                    FROM {self.cfg.DB_TASK_TABLE} t
+                    FROM {self.DB_TASK_TABLE} t
                     {where_sql}
                     ORDER BY t.updated_at DESC
                     LIMIT %s OFFSET %s
@@ -1394,7 +1396,7 @@ class PgClient:
                 cur.execute(
                     f"""
                     SELECT COUNT(*)
-                    FROM {self.cfg.DB_TABLE} r
+                    FROM {self.DB_TABLE} r
                     {where_sql}
                     """,
                     base_params,
@@ -1403,7 +1405,7 @@ class PgClient:
                 cur.execute(
                     f"""
                     SELECT r.type, r.lot_id, r.wafer_id, r.zip_name, r.zip_path, r.created_at
-                    FROM {self.cfg.DB_TABLE} r
+                    FROM {self.DB_TABLE} r
                     {where_sql}
                     ORDER BY r.created_at DESC
                     LIMIT %s OFFSET %s
