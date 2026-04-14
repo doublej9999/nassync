@@ -229,13 +229,16 @@ def main():
             lease_token = None
 
         prev = lifecycle.get_role()
+        prev_token = lifecycle.get_lease_token() if hasattr(lifecycle, "get_lease_token") else None
         lifecycle.set_role("leader" if is_leader else "standby")
         if is_leader:
             pg.set_fencing_context(cfg.SERVICE_NAME, cfg.INSTANCE_ID, lease_token)
             lifecycle.set_lease_token(lease_token)
         else:
-            pg.clear_fencing_context()
-            lifecycle.set_lease_token(None)
+            if prev_token is not None:
+                pg.set_fencing_context(cfg.SERVICE_NAME, cfg.INSTANCE_ID, prev_token)
+            else:
+                pg.clear_fencing_context()
         cur = lifecycle.get_role()
         if cur != prev:
             logger.info("实例角色切换：%s -> %s（instance=%s）", prev, cur, cfg.INSTANCE_ID)

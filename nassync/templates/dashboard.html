@@ -53,9 +53,15 @@
     .status.SUCCESS { background: var(--ok); }
     .status.PENDING { background: var(--warn); }
     .status.FAILED { background: var(--err); }
+    .status.RUNNING { background: #2563eb; }
+    .status.RETRYING { background: #d97706; }
+    .status.SKIPPED { background: #6b7280; }
+    .status.DEAD { background: #991b1b; }
     .pill { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; }
     .pill.feedback { background: #fef3c7; color: #92400e; }
     .pill.normal { background: #dcfce7; color: #166534; }
+    .pill.alert { background: #fee2e2; color: #991b1b; margin-right: 6px; margin-top: 4px; }
+    .pill.okflag { background: #dcfce7; color: #166534; margin-right: 6px; margin-top: 4px; }
     .meta { margin-top: 12px; color: var(--muted); font-size: 12px; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
     .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
     .btn-danger { color: var(--err); }
@@ -177,6 +183,37 @@
           <span id="health_detail">监听器=- Web=- 数据库=- 队列=-</span>
         </div>
       </div>
+      <div class="section">
+        <h2>单活租约可观测</h2>
+        <div class="grid">
+          <div class="card"><div class="label">当前角色</div><div id="lease_role" class="value">-</div></div>
+          <div class="card"><div class="label">本机租约 Token</div><div id="lease_token" class="value">-</div></div>
+          <div class="card"><div class="label">租约 Owner</div><div id="lease_owner" class="value" style="font-size:18px">-</div></div>
+          <div class="card"><div class="label">租约有效</div><div id="lease_valid" class="value">-</div></div>
+          <div class="card"><div class="label">租约到期时间</div><div id="lease_until" class="value" style="font-size:18px">-</div></div>
+          <div class="card"><div class="label">角色切换总数</div><div id="role_switch_total" class="value warn">-</div></div>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-head">
+          <h2>失败治理可观测</h2>
+          <div>
+            <button id="replay_dead_btn" class="btn-primary" type="button">重放前 20 条死信</button>
+            <button id="refresh_dead_btn" type="button">刷新死信</button>
+          </div>
+        </div>
+        <div class="grid">
+          <div class="card"><div class="label">重试中任务数</div><div id="q_retrying" class="value warn">-</div></div>
+          <div class="card"><div class="label">死信任务数</div><div id="q_dead" class="value err">-</div></div>
+          <div class="card"><div class="label">最老待处理秒数</div><div id="q_oldest_pending" class="value warn">-</div></div>
+          <div class="card"><div class="label">DB 连接失败计数</div><div id="q_db_failures" class="value err">-</div></div>
+        </div>
+        <div id="alert_flags" class="meta">告警：-</div>
+        <table>
+          <thead><tr><th>更新时间</th><th>ZIP 路径</th><th>尝试次数</th><th>最后错误</th><th>操作</th></tr></thead>
+          <tbody id="dead_tbody"></tbody>
+        </table>
+      </div>
     </div>
 
     <div id="page_config" class="page">
@@ -227,6 +264,7 @@
       currentPage: 'stats',
       statsScope: 'normal',
       refreshTimer: null,
+      deadItems: [],
     };
 
     function getScopeText(scope) {
@@ -252,6 +290,68 @@
       }
       return data;
     }
+
+    function formatAlerts(alerts) {
+      const flags = alerts || {};
+      const items = [];
+      const map = {
+        queue_backlog: '队列积压',
+        high_retrying: '重试偏高',
+        dead_letters_present: '存在死信',
+        db_unstable: '数据库不稳定',
+        role_flapping: '角色抖动',
+      };
+      Object.keys(map).forEach(k => {
+        const on = Boolean(flags[k]);
+        items.push(`<span class="pill ${on ? 'alert' : 'okflag'}">${map[k]}:${on ? '是' : '否'}</span>`);
+      });
+      return items.join('');
+    }
+
+    function renderDeadTasks(items) {
+      state.deadItems = items || [];
+      const tbody = document.getElementById('dead_tbody');
+      if (!state.deadItems.length) {
+        tbody.innerHTML = '<tr><td colspan="5">暂无死信任务</td></tr>';
+        return;
+      }
+      tbody.innerHTML = state.deadItems.map(x => `
+        <tr>
+          <td>${esc(x.updated_at || '-')}</td>
+          <td class="mono">${esc(x.zip_path || '-')}</td>
+          <td>${esc(x.attempt ?? 0)}</td>
+          <td>${esc(x.last_error || '-')}</td>
+          <td><button type="button" onclick="replayOneDead('${esc((x.zip_path || '').replace(/'/g, "\\'"))}')">重放</button></td>
+        </tr>
+      `).join('');
+    }
+
+    async function loadDeadTasks() {
+      const data = await fetchJson('/api/task-queue/dead?limit=100');
+      renderDeadTasks(data.items || []);
+    }
+
+    async function replayDead(zip_path, limit = 20) {
+      const payload = zip_path ? { zip_path } : { limit };
+      const data = await fetchJson('/api/task-queue/replay-dead', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      await loadDeadTasks();
+      alert(`已重放 ${data.replayed || 0} 条任务`);
+    }
+
+    async function replayOneDead(zip_path) {
+      if (!zip_path) return;
+      if (!window.confirm('确认重放该死信任务吗？')) return;
+      try {
+        await replayDead(zip_path, 1);
+      } catch (e) {
+        alert(e.message || '重放失败');
+      }
+    }
+    window.replayOneDead = replayOneDead;
 
     function renderConfigs(items) {
       state.configs = items || [];
@@ -364,7 +464,10 @@
         record_page_size: String(state.record.page_size),
         record_q: state.record.q,
       });
-      const data = await fetchJson('/api/dashboard?' + params.toString());
+      const [data, deadData] = await Promise.all([
+        fetchJson('/api/dashboard?' + params.toString()),
+        fetchJson('/api/task-queue/dead?limit=100').catch(() => ({ items: [] })),
+      ]);
       state.statsScope = data.scope === 'feedback' ? 'feedback' : 'normal';
       updateScopeUI();
 
@@ -390,6 +493,19 @@
       const health = data.health || {};
       document.getElementById('health_status').textContent = `health=${health.status || '-'}`;
       document.getElementById('health_detail').textContent = `watcher=${health.watcher || '-'} web=${health.web || '-'} db=${health.db || '-'} queue=${runtime.queue_depth ?? '-'}`;
+      document.getElementById('lease_role').textContent = health.role || '-';
+      document.getElementById('lease_token').textContent = health.lease_token ?? '-';
+      document.getElementById('lease_owner').textContent = (health.lease && health.lease.owner_id) || '-';
+      document.getElementById('lease_valid').textContent = health.lease && health.lease.valid ? '是' : '否';
+      document.getElementById('lease_valid').className = `value ${(health.lease && health.lease.valid) ? 'ok' : 'err'}`;
+      document.getElementById('lease_until').textContent = (health.lease && health.lease.lease_until) || '-';
+      document.getElementById('role_switch_total').textContent = health.role_switch_total ?? 0;
+      document.getElementById('q_retrying').textContent = health.retrying_count ?? 0;
+      document.getElementById('q_dead').textContent = health.dead_count ?? 0;
+      document.getElementById('q_oldest_pending').textContent = health.oldest_pending_sec ?? 0;
+      document.getElementById('q_db_failures').textContent = health.db_connect_failures ?? 0;
+      document.getElementById('alert_flags').innerHTML = `告警：${formatAlerts(health.alerts || {})}`;
+      renderDeadTasks(deadData.items || []);
 
       document.getElementById('type_tbody').innerHTML = (data.by_type || []).map(x => `
         <tr><td>${esc(x.type)}</td><td>${esc(x.task_count)}</td><td>${esc(x.last_update || '-')}</td></tr>
@@ -499,6 +615,14 @@
         state.record.page = 1;
         updateScopeUI();
         tick();
+      });
+
+      document.getElementById('refresh_dead_btn').addEventListener('click', async () => {
+        try { await loadDeadTasks(); } catch (e) { alert(e.message || '加载死信失败'); }
+      });
+      document.getElementById('replay_dead_btn').addEventListener('click', async () => {
+        if (!window.confirm('确认重放前 20 条死信任务吗？')) return;
+        try { await replayDead(null, 20); } catch (e) { alert(e.message || '重放失败'); }
       });
     }
 
