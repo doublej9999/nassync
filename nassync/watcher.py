@@ -81,8 +81,12 @@ class ServiceLifecycle:
         self.handler = handler
         self._observer_lock = threading.Lock()
         self._role_lock = threading.Lock()
+        self._metrics_lock = threading.Lock()
         self.observer = None
         self._role = "standby"
+        self._lease_token = None
+        self._role_switch_total = 0
+        self._last_role_switch_at = None
         if observer is not None:
             self.set_observer(observer)
         self._web_running = threading.Event()
@@ -122,7 +126,12 @@ class ServiceLifecycle:
         if value not in {"leader", "standby"}:
             value = "standby"
         with self._role_lock:
+            old = self._role
             self._role = value
+        if old != value:
+            with self._metrics_lock:
+                self._role_switch_total += 1
+                self._last_role_switch_at = time.time()
 
     def get_role(self):
         with self._role_lock:
@@ -130,6 +139,22 @@ class ServiceLifecycle:
 
     def is_leader(self):
         return self.get_role() == "leader"
+
+    def set_lease_token(self, token):
+        with self._metrics_lock:
+            self._lease_token = int(token) if token is not None else None
+
+    def get_lease_token(self):
+        with self._metrics_lock:
+            return self._lease_token
+
+    def role_switch_total(self):
+        with self._metrics_lock:
+            return int(self._role_switch_total)
+
+    def last_role_switch_at(self):
+        with self._metrics_lock:
+            return self._last_role_switch_at
 
     def watcher_healthy(self):
         observer = self.get_observer()

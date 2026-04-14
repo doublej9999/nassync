@@ -240,3 +240,49 @@ def test_persistent_queue_not_starved_by_memory_queue():
 
     pool.shutdown(wait=False)
     assert Path("/db/retry.zip") in processor.processed
+
+
+def test_non_leader_does_not_process_memory_task_with_persistent_queue():
+    class RoleCfg(FakeCfg):
+        TASK_LOCK_RENEW_INTERVAL_SEC = 1
+
+    class RoleProcessor:
+        cfg = RoleCfg()
+
+        def __init__(self):
+            self.processed = []
+
+        def process(self, path):
+            self.processed.append(path)
+            return None
+
+    class RolePg:
+        def __init__(self):
+            self.enqueued = []
+
+        def enqueue_task(self, path):
+            self.enqueued.append(Path(path))
+
+        def claim_due_tasks(self, worker_id, batch_size, lock_sec):
+            return []
+
+    processor = RoleProcessor()
+    pg = RolePg()
+    pool = TaskWorkerPool(
+        processor,
+        worker_count=1,
+        max_queue_size=10,
+        pg=pg,
+        persistent_queue=True,
+        worker_id_prefix="test",
+        can_process=lambda: False,
+    )
+
+    pool.enqueue(Path("/mem/not-leader.zip"))
+    deadline = time.time() + 1
+    while time.time() < deadline and pool.queue.qsize() > 0:
+        time.sleep(0.02)
+
+    pool.shutdown(wait=False)
+    assert processor.processed == []
+    assert Path("/mem/not-leader.zip") in pg.enqueued

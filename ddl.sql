@@ -72,9 +72,13 @@ ON map_path_config (enabled, sync_types);
 CREATE TABLE IF NOT EXISTS service_lease (
     service_name VARCHAR(128) PRIMARY KEY,
     owner_id VARCHAR(255) NOT NULL,
+    lease_token BIGINT NOT NULL DEFAULT 0,
     lease_until TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE service_lease
+ADD COLUMN IF NOT EXISTS lease_token BIGINT NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS zip_task_queue (
     id BIGSERIAL PRIMARY KEY,
@@ -89,8 +93,16 @@ CREATE TABLE IF NOT EXISTS zip_task_queue (
     updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_zip_task_queue_zip_path UNIQUE (zip_path),
     CONSTRAINT ck_zip_task_queue_status CHECK (
-        status IN ('PENDING', 'RUNNING', 'RETRYING', 'SUCCESS', 'FAILED', 'SKIPPED')
+        status IN ('PENDING', 'RUNNING', 'RETRYING', 'SUCCESS', 'FAILED', 'SKIPPED', 'DEAD')
     )
+);
+
+ALTER TABLE zip_task_queue
+DROP CONSTRAINT IF EXISTS ck_zip_task_queue_status;
+
+ALTER TABLE zip_task_queue
+ADD CONSTRAINT ck_zip_task_queue_status CHECK (
+    status IN ('PENDING', 'RUNNING', 'RETRYING', 'SUCCESS', 'FAILED', 'SKIPPED', 'DEAD')
 );
 
 CREATE INDEX IF NOT EXISTS idx_zip_task_queue_pick

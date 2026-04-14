@@ -89,7 +89,7 @@
 
   <div class="wrap content">
     <div id="page_stats" class="page">
-      <div class="sub">自动刷新间隔：5 秒</div>
+      <div class="sub">自动刷新间隔：__AUTO_REFRESH_INTERVAL_SEC__ 秒</div>
       <div class="scope-switch">
         <button id="stats_scope_toggle_btn" type="button" class="btn-primary">切换到回传统计</button>
         <span id="stats_scope_text" class="scope-note">当前统计：非回传</span>
@@ -511,7 +511,7 @@
 
     function startAutoRefresh() {
       if (state.refreshTimer) return;
-      state.refreshTimer = setInterval(tick, 5000);
+      state.refreshTimer = setInterval(tick, __AUTO_REFRESH_INTERVAL_MS__);
     }
 
     function switchPage(page, updateHash) {

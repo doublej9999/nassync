@@ -45,6 +45,12 @@ def main():
         logger.warning("初始化 map_path_config 默认配置失败：%s", summarize_error_msg(ex))
 
     processor = Processor(cfg, pg, runtime_metrics=runtime_metrics)
+    lifecycle_ref = {"obj": None}
+
+    def can_process():
+        obj = lifecycle_ref.get("obj")
+        return bool(obj and obj.is_leader())
+
     worker_pool = TaskWorkerPool(
         processor,
         max_queue_size=cfg.TASK_QUEUE_MAX_SIZE,
@@ -52,6 +58,7 @@ def main():
         pg=pg,
         persistent_queue=cfg.USE_PERSISTENT_QUEUE,
         worker_id_prefix=cfg.INSTANCE_ID,
+        can_process=can_process,
     )
 
     handler = Handler(
@@ -60,6 +67,7 @@ def main():
         runtime_metrics=runtime_metrics,
     )
     lifecycle = ServiceLifecycle(handler)
+    lifecycle_ref["obj"] = lifecycle
     lifecycle.set_role("standby")
     watch_retry_interval = max(1.0, float(cfg.PROCESS_RETRY_INTERVAL_SEC))
     last_watch_attempt_at = 0.0
@@ -209,17 +217,25 @@ def main():
         last_lease_check_at = now
 
         try:
-            is_leader = pg.try_acquire_or_renew_lease(
+            is_leader, lease_token = pg.try_acquire_or_renew_lease(
                 cfg.SERVICE_NAME,
                 cfg.INSTANCE_ID,
                 cfg.LEASE_DURATION_SEC,
+                return_token=True,
             )
         except Exception as ex:
             logger.warning("续约失败，保持 standby：%s", summarize_error_msg(ex))
             is_leader = False
+            lease_token = None
 
         prev = lifecycle.get_role()
         lifecycle.set_role("leader" if is_leader else "standby")
+        if is_leader:
+            pg.set_fencing_context(cfg.SERVICE_NAME, cfg.INSTANCE_ID, lease_token)
+            lifecycle.set_lease_token(lease_token)
+        else:
+            pg.clear_fencing_context()
+            lifecycle.set_lease_token(None)
         cur = lifecycle.get_role()
         if cur != prev:
             logger.info("实例角色切换：%s -> %s（instance=%s）", prev, cur, cfg.INSTANCE_ID)

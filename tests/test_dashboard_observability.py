@@ -5,6 +5,8 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from nassync.dashboard import create_dashboard_handler
@@ -36,17 +38,32 @@ class _FakePg:
     def get_recent_records(self, **kwargs):
         return {"items": [], "page": 1, "page_size": 20, "total": 0, "total_pages": 1}
 
+    @staticmethod
+    def get_runtime_metrics():
+        return {"queue_depth": 1, "retrying_count": 0, "dead_count": 0, "oldest_pending_sec": 0}
+
 
 class _FakeLifecycle:
-    def __init__(self, watcher_ok, web_ok):
+    def __init__(self, watcher_ok, web_ok, role="leader"):
         self._watcher_ok = watcher_ok
         self._web_ok = web_ok
+        self._role = role
 
     def watcher_healthy(self):
         return self._watcher_ok
 
     def web_healthy(self):
         return self._web_ok
+
+    def get_role(self):
+        return self._role
+
+    def role_switch_total(self):
+        return 0
+
+    @staticmethod
+    def get_lease_token():
+        return 0
 
     @staticmethod
     def is_shutting_down():
@@ -128,3 +145,21 @@ def test_dashboard_api_includes_runtime_metrics_snapshot():
     assert "runtime" in payload
     assert payload["runtime"]["events_received_total"] == 5
     assert payload["runtime"]["queue_depth"] == 3
+
+
+def test_readyz_returns_503_when_standby():
+    handler_cls = create_dashboard_handler(
+        _FakePg(),
+        _FakeLifecycle(watcher_ok=True, web_ok=True, role="standby"),
+        _FakeCfg(),
+        runtime_metrics=_FakeRuntimeMetrics(),
+        worker_pool=_FakeWorkerPool(0),
+    )
+    server, thread = _start_server(handler_cls)
+    try:
+        with pytest.raises(Exception):
+            _get_json(f"http://127.0.0.1:{server.server_port}/readyz")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)

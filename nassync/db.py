@@ -10,7 +10,7 @@ from psycopg2 import pool
 from psycopg2.extras import execute_values
 
 from .config import Config
-from .errors import summarize_error_msg
+from .errors import FencingTokenLostError, summarize_error_msg
 
 logger = logging.getLogger("watcher")
 
@@ -35,6 +35,10 @@ class PgClient:
         self._map_cache_lock = threading.Lock()
         self._map_config_cache = []
         self._map_config_cache_expire_at = 0.0
+        self._fencing_lock = threading.Lock()
+        self._fencing_service_name = ""
+        self._fencing_owner_id = ""
+        self._fencing_lease_token = None
 
     def _validate_sql_identifiers(self):
         identifiers = {
@@ -192,6 +196,59 @@ class PgClient:
     def release_connection(self, active_pool, conn):
         self._release_conn(active_pool, conn)
 
+    def set_fencing_context(self, service_name: str, owner_id: str, lease_token: int | None):
+        with self._fencing_lock:
+            self._fencing_service_name = str(service_name or "").strip()
+            self._fencing_owner_id = str(owner_id or "").strip()
+            self._fencing_lease_token = int(lease_token) if lease_token is not None else None
+
+    def clear_fencing_context(self):
+        with self._fencing_lock:
+            self._fencing_service_name = ""
+            self._fencing_owner_id = ""
+            self._fencing_lease_token = None
+
+    def _fencing_context(self):
+        with self._fencing_lock:
+            return (
+                self._fencing_service_name,
+                self._fencing_owner_id,
+                self._fencing_lease_token,
+            )
+
+    def ensure_fencing_valid(self):
+        service_name, owner_id, lease_token = self._fencing_context()
+        if not service_name or not owner_id or lease_token is None:
+            return True
+        with self._readonly() as conn:
+            with conn.cursor() as cur:
+                self._assert_fencing_valid(cur, service_name, owner_id, lease_token)
+        return True
+
+    def _assert_fencing_valid(self, cur, service_name=None, owner_id=None, lease_token=None):
+        if service_name is None or owner_id is None or lease_token is None:
+            service_name, owner_id, lease_token = self._fencing_context()
+        if not service_name or not owner_id or lease_token is None:
+            return
+
+        cur.execute(
+            f"""
+            SELECT owner_id, lease_token, lease_until >= NOW()
+            FROM {self.SERVICE_LEASE_TABLE}
+            WHERE service_name = %s
+            """,
+            (service_name,),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise FencingTokenLostError("租约已不存在，当前实例失去写权限")
+
+        row_owner, row_token, lease_valid = row
+        if (not lease_valid) or row_owner != owner_id or int(row_token or 0) != int(lease_token):
+            raise FencingTokenLostError(
+                f"租约令牌已失效（owner={row_owner}, token={row_token}）"
+            )
+
     def _insert_records_with_cursor(self, cur, rec_type, lot_wafer_pairs, zip_name, zip_path):
         sql = f"""
         INSERT INTO {self.cfg.DB_TABLE}
@@ -211,6 +268,7 @@ class PgClient:
     def insert_records(self, rec_type, lot_wafer_pairs, zip_name, zip_path, conn=None):
         if conn is not None:
             with conn.cursor() as cur:
+                self._assert_fencing_valid(cur)
                 self._insert_records_with_cursor(
                     cur, rec_type, lot_wafer_pairs, zip_name, zip_path
                 )
@@ -218,6 +276,7 @@ class PgClient:
 
         with self._transaction() as owned_conn:
             with owned_conn.cursor() as cur:
+                self._assert_fencing_valid(cur)
                 self._insert_records_with_cursor(
                     cur, rec_type, lot_wafer_pairs, zip_name, zip_path
                 )
@@ -226,6 +285,7 @@ class PgClient:
         major_error = summarize_error_msg(error_msg, max_len=200)
         with self._transaction() as conn:
             with conn.cursor() as cur:
+                self._assert_fencing_valid(cur)
                 sql = f"""
                 INSERT INTO {self.cfg.DB_TASK_TABLE}
                 (type, zip_name, zip_path, status, error_msg, is_feedback, updated_at)
@@ -314,9 +374,16 @@ class PgClient:
                         CREATE TABLE IF NOT EXISTS {self.SERVICE_LEASE_TABLE} (
                             service_name VARCHAR(128) PRIMARY KEY,
                             owner_id VARCHAR(255) NOT NULL,
+                            lease_token BIGINT NOT NULL DEFAULT 0,
                             lease_until TIMESTAMP NOT NULL,
                             updated_at TIMESTAMP NOT NULL DEFAULT NOW()
                         )
+                        """
+                    )
+                    cur.execute(
+                        f"""
+                        ALTER TABLE {self.SERVICE_LEASE_TABLE}
+                        ADD COLUMN IF NOT EXISTS lease_token BIGINT NOT NULL DEFAULT 0
                         """
                     )
                     cur.execute(
@@ -334,8 +401,22 @@ class PgClient:
                             updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
                             CONSTRAINT uq_zip_task_queue_zip_path UNIQUE (zip_path),
                             CONSTRAINT ck_zip_task_queue_status CHECK (
-                                status IN ('PENDING', 'RUNNING', 'RETRYING', 'SUCCESS', 'FAILED', 'SKIPPED')
+                                status IN ('PENDING', 'RUNNING', 'RETRYING', 'SUCCESS', 'FAILED', 'SKIPPED', 'DEAD')
                             )
+                        )
+                        """
+                    )
+                    cur.execute(
+                        f"""
+                        ALTER TABLE {self.TASK_QUEUE_TABLE}
+                        DROP CONSTRAINT IF EXISTS ck_zip_task_queue_status
+                        """
+                    )
+                    cur.execute(
+                        f"""
+                        ALTER TABLE {self.TASK_QUEUE_TABLE}
+                        ADD CONSTRAINT ck_zip_task_queue_status CHECK (
+                            status IN ('PENDING', 'RUNNING', 'RETRYING', 'SUCCESS', 'FAILED', 'SKIPPED', 'DEAD')
                         )
                         """
                     )
@@ -353,17 +434,29 @@ class PgClient:
                     )
             self._ha_tables_ready = True
 
-    def try_acquire_or_renew_lease(self, service_name: str, owner_id: str, lease_sec: int) -> bool:
+    def try_acquire_or_renew_lease(
+        self,
+        service_name: str,
+        owner_id: str,
+        lease_sec: int,
+        return_token=False,
+    ) -> bool | tuple[bool, int | None]:
         self._ensure_ha_tables()
         lease_sec = max(5, int(lease_sec or 30))
         with self._transaction() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     f"""
-                    INSERT INTO {self.SERVICE_LEASE_TABLE} (service_name, owner_id, lease_until, updated_at)
-                    VALUES (%s, %s, NOW() + (%s || ' seconds')::interval, NOW())
+                    INSERT INTO {self.SERVICE_LEASE_TABLE}
+                    (service_name, owner_id, lease_token, lease_until, updated_at)
+                    VALUES (%s, %s, 0, NOW() + (%s || ' seconds')::interval, NOW())
                     ON CONFLICT (service_name) DO UPDATE
                     SET owner_id = EXCLUDED.owner_id,
+                        lease_token = CASE
+                            WHEN {self.SERVICE_LEASE_TABLE}.owner_id = EXCLUDED.owner_id
+                                THEN {self.SERVICE_LEASE_TABLE}.lease_token
+                            ELSE {self.SERVICE_LEASE_TABLE}.lease_token + 1
+                        END,
                         lease_until = EXCLUDED.lease_until,
                         updated_at = NOW()
                     WHERE {self.SERVICE_LEASE_TABLE}.owner_id = EXCLUDED.owner_id
@@ -372,11 +465,19 @@ class PgClient:
                     (service_name, owner_id, lease_sec),
                 )
                 cur.execute(
-                    f"SELECT owner_id FROM {self.SERVICE_LEASE_TABLE} WHERE service_name = %s",
+                    f"""
+                    SELECT owner_id, lease_token
+                    FROM {self.SERVICE_LEASE_TABLE}
+                    WHERE service_name = %s
+                    """,
                     (service_name,),
                 )
                 row = cur.fetchone()
-        return bool(row and row[0] == owner_id)
+        is_owner = bool(row and row[0] == owner_id)
+        token = int(row[1]) if is_owner and row and row[1] is not None else None
+        if return_token:
+            return is_owner, token
+        return is_owner
 
     def get_lease_owner(self, service_name: str):
         self._ensure_ha_tables()
@@ -394,6 +495,28 @@ class PgClient:
                 row = cur.fetchone()
         return row[0] if row else None
 
+    def get_lease_snapshot(self, service_name: str):
+        self._ensure_ha_tables()
+        with self._readonly() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT owner_id, lease_token, lease_until, lease_until >= NOW() AS valid
+                    FROM {self.SERVICE_LEASE_TABLE}
+                    WHERE service_name = %s
+                    """,
+                    (service_name,),
+                )
+                row = cur.fetchone()
+        if not row:
+            return None
+        return {
+            "owner_id": row[0],
+            "lease_token": int(row[1] or 0),
+            "lease_until": row[2].strftime("%Y-%m-%d %H:%M:%S") if row[2] else None,
+            "valid": bool(row[3]),
+        }
+
     def enqueue_task(self, zip_path: Path | str):
         self._ensure_ha_tables()
         path_value = str(Path(zip_path))
@@ -406,7 +529,7 @@ class PgClient:
                     VALUES (%s, 'PENDING', 0, NOW(), NULL, NULL, NULL, NOW())
                     ON CONFLICT (zip_path) DO UPDATE
                     SET status = CASE
-                        WHEN {self.TASK_QUEUE_TABLE}.status IN ('SUCCESS', 'FAILED', 'SKIPPED') THEN 'PENDING'
+                        WHEN {self.TASK_QUEUE_TABLE}.status IN ('SUCCESS', 'FAILED', 'SKIPPED', 'DEAD') THEN 'PENDING'
                         WHEN {self.TASK_QUEUE_TABLE}.status = 'RUNNING' THEN {self.TASK_QUEUE_TABLE}.status
                         ELSE 'PENDING'
                     END,
@@ -436,6 +559,7 @@ class PgClient:
         lock_seconds = max(5, int(lock_sec or 120))
         with self._transaction() as conn:
             with conn.cursor() as cur:
+                self._assert_fencing_valid(cur)
                 cur.execute(
                     f"""
                     WITH picked AS (
@@ -466,6 +590,7 @@ class PgClient:
         self._ensure_ha_tables()
         with self._transaction() as conn:
             with conn.cursor() as cur:
+                self._assert_fencing_valid(cur)
                 cur.execute(
                     f"""
                     UPDATE {self.TASK_QUEUE_TABLE}
@@ -484,6 +609,7 @@ class PgClient:
         self._ensure_ha_tables()
         with self._transaction() as conn:
             with conn.cursor() as cur:
+                self._assert_fencing_valid(cur)
                 cur.execute(
                     f"""
                     UPDATE {self.TASK_QUEUE_TABLE}
@@ -496,16 +622,35 @@ class PgClient:
                     (str(worker_id or ""), max(5, int(self.cfg.TASK_LOCK_SEC or 120)), str(Path(zip_path))),
                 )
 
-    def mark_task_retry(self, zip_path: Path | str, delay_sec: float, error_msg=""):
+    def renew_task_lock(self, zip_path: Path | str, worker_id: str, lock_sec: int):
         self._ensure_ha_tables()
-        delay = max(0.1, float(delay_sec or 0.1))
+        lock_seconds = max(5, int(lock_sec or 120))
         with self._transaction() as conn:
             with conn.cursor() as cur:
+                self._assert_fencing_valid(cur)
                 cur.execute(
                     f"""
                     UPDATE {self.TASK_QUEUE_TABLE}
-                    SET status = 'RETRYING',
-                        attempt = attempt + 1,
+                    SET locked_until = NOW() + (%s || ' seconds')::interval,
+                        updated_at = NOW()
+                    WHERE zip_path = %s
+                      AND status = 'RUNNING'
+                      AND (locked_by IS NULL OR locked_by = %s)
+                    """,
+                    (lock_seconds, str(Path(zip_path)), str(worker_id or "")),
+                )
+                return cur.rowcount > 0
+
+    def release_task_claim(self, zip_path: Path | str, delay_sec: float = 0.0, reason="释放认领"):
+        self._ensure_ha_tables()
+        delay = max(0.0, float(delay_sec or 0.0))
+        with self._transaction() as conn:
+            with conn.cursor() as cur:
+                self._assert_fencing_valid(cur)
+                cur.execute(
+                    f"""
+                    UPDATE {self.TASK_QUEUE_TABLE}
+                    SET status = 'PENDING',
                         next_retry_at = NOW() + (%s || ' seconds')::interval,
                         locked_by = NULL,
                         locked_until = NULL,
@@ -513,13 +658,48 @@ class PgClient:
                         updated_at = NOW()
                     WHERE zip_path = %s
                     """,
-                    (delay, summarize_error_msg(error_msg, max_len=200), str(Path(zip_path))),
+                    (delay, summarize_error_msg(reason, max_len=200), str(Path(zip_path))),
+                )
+
+    def mark_task_retry(self, zip_path: Path | str, delay_sec: float, error_msg=""):
+        self._ensure_ha_tables()
+        delay = max(0.1, float(delay_sec or 0.1))
+        max_attempt = max(1, int(self.cfg.TASK_MAX_ATTEMPTS or 1))
+        with self._transaction() as conn:
+            with conn.cursor() as cur:
+                self._assert_fencing_valid(cur)
+                cur.execute(
+                    f"""
+                    UPDATE {self.TASK_QUEUE_TABLE}
+                    SET status = CASE
+                            WHEN attempt + 1 >= %s THEN 'DEAD'
+                            ELSE 'RETRYING'
+                        END,
+                        attempt = attempt + 1,
+                        next_retry_at = CASE
+                            WHEN attempt + 1 >= %s THEN NULL
+                            ELSE NOW() + (%s || ' seconds')::interval
+                        END,
+                        locked_by = NULL,
+                        locked_until = NULL,
+                        last_error = %s,
+                        updated_at = NOW()
+                    WHERE zip_path = %s
+                    """,
+                    (
+                        max_attempt,
+                        max_attempt,
+                        delay,
+                        summarize_error_msg(error_msg, max_len=200),
+                        str(Path(zip_path)),
+                    ),
                 )
 
     def mark_task_failed(self, zip_path: Path | str, error_msg=""):
         self._ensure_ha_tables()
         with self._transaction() as conn:
             with conn.cursor() as cur:
+                self._assert_fencing_valid(cur)
                 cur.execute(
                     f"""
                     UPDATE {self.TASK_QUEUE_TABLE}
@@ -539,6 +719,7 @@ class PgClient:
         self._ensure_ha_tables()
         with self._transaction() as conn:
             with conn.cursor() as cur:
+                self._assert_fencing_valid(cur)
                 cur.execute(
                     f"""
                     UPDATE {self.TASK_QUEUE_TABLE}
@@ -553,10 +734,87 @@ class PgClient:
                     (summarize_error_msg(reason, max_len=200), str(Path(zip_path))),
                 )
 
+    def replay_dead_tasks(self, zip_path: Path | str | None = None, limit=20):
+        self._ensure_ha_tables()
+        batch = max(1, int(limit or 1))
+        path_value = str(Path(zip_path)) if zip_path else None
+        with self._transaction() as conn:
+            with conn.cursor() as cur:
+                self._assert_fencing_valid(cur)
+                if path_value:
+                    cur.execute(
+                        f"""
+                        UPDATE {self.TASK_QUEUE_TABLE}
+                        SET status = 'PENDING',
+                            next_retry_at = NOW(),
+                            locked_by = NULL,
+                            locked_until = NULL,
+                            updated_at = NOW()
+                        WHERE zip_path = %s
+                          AND status = 'DEAD'
+                        RETURNING zip_path
+                        """,
+                        (path_value,),
+                    )
+                else:
+                    cur.execute(
+                        f"""
+                        WITH picked AS (
+                            SELECT id
+                            FROM {self.TASK_QUEUE_TABLE}
+                            WHERE status = 'DEAD'
+                            ORDER BY updated_at ASC
+                            LIMIT %s
+                            FOR UPDATE SKIP LOCKED
+                        )
+                        UPDATE {self.TASK_QUEUE_TABLE} q
+                        SET status = 'PENDING',
+                            next_retry_at = NOW(),
+                            locked_by = NULL,
+                            locked_until = NULL,
+                            updated_at = NOW()
+                        FROM picked
+                        WHERE q.id = picked.id
+                        RETURNING q.zip_path
+                        """,
+                        (batch,),
+                    )
+                rows = cur.fetchall()
+        return [str(row[0]) for row in rows]
+
+    def get_dead_tasks(self, limit=100):
+        self._ensure_ha_tables()
+        batch = max(1, min(int(limit or 100), 500))
+        with self._readonly() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT zip_path, attempt, last_error, updated_at
+                    FROM {self.TASK_QUEUE_TABLE}
+                    WHERE status = 'DEAD'
+                    ORDER BY updated_at DESC
+                    LIMIT %s
+                    """,
+                    (batch,),
+                )
+                rows = cur.fetchall()
+        result = []
+        for row in rows:
+            result.append(
+                {
+                    "zip_path": row[0],
+                    "attempt": int(row[1] or 0),
+                    "last_error": row[2],
+                    "updated_at": row[3].strftime("%Y-%m-%d %H:%M:%S") if row[3] else None,
+                }
+            )
+        return result
+
     def get_runtime_metrics(self):
         metrics = {
             "queue_depth": 0,
             "retrying_count": 0,
+            "dead_count": 0,
             "oldest_pending_sec": 0,
             "db_connect_failures": int(self._connect_failures or 0),
         }
@@ -569,16 +827,18 @@ class PgClient:
                         SELECT
                           COUNT(*) FILTER (WHERE status IN ('PENDING', 'RUNNING', 'RETRYING')) AS queue_depth,
                           COUNT(*) FILTER (WHERE status = 'RETRYING') AS retrying_count,
+                          COUNT(*) FILTER (WHERE status = 'DEAD') AS dead_count,
                           COALESCE(EXTRACT(EPOCH FROM (NOW() - MIN(created_at)))::BIGINT, 0) AS oldest_pending_sec
                         FROM {self.TASK_QUEUE_TABLE}
-                        WHERE status IN ('PENDING', 'RUNNING', 'RETRYING')
+                        WHERE status IN ('PENDING', 'RUNNING', 'RETRYING', 'DEAD')
                         """
                     )
                     row = cur.fetchone()
                     if row:
                         metrics["queue_depth"] = int(row[0] or 0)
                         metrics["retrying_count"] = int(row[1] or 0)
-                        metrics["oldest_pending_sec"] = int(row[2] or 0)
+                        metrics["dead_count"] = int(row[2] or 0)
+                        metrics["oldest_pending_sec"] = int(row[3] or 0)
         except Exception:
             # 指标采集失败不影响主流程
             pass
@@ -886,6 +1146,7 @@ class PgClient:
         value = float(candidate_ts or 0)
         with self._transaction() as conn:
             with conn.cursor() as cur:
+                self._assert_fencing_valid(cur)
                 cur.execute(
                     f"""
                     UPDATE {self.MAP_PATH_TABLE}

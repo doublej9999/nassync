@@ -41,6 +41,13 @@ def create_dashboard_handler(
 ):
     cache_lock = threading.Lock()
     cache_ttl_sec = max(0.0, float(cfg.DASHBOARD_CACHE_TTL_SEC))
+    auto_refresh_sec = max(0.1, float(getattr(cfg, "DASHBOARD_AUTO_REFRESH_SEC", 5.0)))
+    auto_refresh_ms = max(100, int(auto_refresh_sec * 1000))
+    auto_refresh_sec_text = f"{auto_refresh_sec:g}"
+    dashboard_html = (
+        DASHBOARD_HTML.replace("__AUTO_REFRESH_INTERVAL_SEC__", auto_refresh_sec_text)
+        .replace("__AUTO_REFRESH_INTERVAL_MS__", str(auto_refresh_ms))
+    )
     cache_key = None
     cache_payload = None
     cache_expire_at = 0.0
@@ -78,10 +85,55 @@ def create_dashboard_handler(
                 return None
             return payload
 
+        def _health_snapshot(self):
+            watcher_state = "running" if lifecycle.watcher_healthy() else "stopped"
+            web_state = "running" if lifecycle.web_healthy() else "stopped"
+            db_ok, db_msg = pg.check_health()
+            queue_depth = None
+            if worker_pool is not None and getattr(worker_pool, "queue", None) is not None:
+                try:
+                    queue_depth = int(worker_pool.queue.qsize())
+                except Exception:
+                    queue_depth = None
+            role = lifecycle.get_role() if hasattr(lifecycle, "get_role") else "unknown"
+            runtime_db_metrics = pg.get_runtime_metrics() if hasattr(pg, "get_runtime_metrics") else {}
+            lease_snapshot = (
+                pg.get_lease_snapshot(getattr(cfg, "SERVICE_NAME", ""))
+                if hasattr(pg, "get_lease_snapshot")
+                else None
+            )
+            role_switch_total = lifecycle.role_switch_total() if hasattr(lifecycle, "role_switch_total") else 0
+            lease_token = lifecycle.get_lease_token() if hasattr(lifecycle, "get_lease_token") else None
+
+            payload = {
+                "role": role,
+                "watcher": watcher_state,
+                "web": web_state,
+                "db": "ok" if db_ok else "error",
+                "db_error": db_msg,
+                "queue_depth": queue_depth,
+                "shutting_down": lifecycle.is_shutting_down(),
+                "lease_token": lease_token,
+                "role_switch_total": role_switch_total,
+                "lease": lease_snapshot,
+            }
+            for key, value in (runtime_db_metrics or {}).items():
+                payload.setdefault(key, value)
+
+            alerts = {
+                "queue_backlog": bool((payload.get("queue_depth") or 0) > 0 and (payload.get("oldest_pending_sec") or 0) >= 300),
+                "high_retrying": bool((payload.get("retrying_count") or 0) >= 10),
+                "dead_letters_present": bool((payload.get("dead_count") or 0) > 0),
+                "db_unstable": bool((payload.get("db_connect_failures") or 0) > 0),
+                "role_flapping": bool(role_switch_total >= 3),
+            }
+            payload["alerts"] = alerts
+            return payload, db_ok
+
         def do_GET(self):
             parsed = urlparse(self.path)
             if parsed.path in ("/", "/dashboard"):
-                self._send_html(DASHBOARD_HTML)
+                self._send_html(dashboard_html)
                 return
 
             if parsed.path == "/api/map-path-config":
@@ -96,31 +148,47 @@ def create_dashboard_handler(
                 self._send_json({"items": rows})
                 return
 
-            if parsed.path == "/healthz":
-                watcher_state = "running" if lifecycle.watcher_healthy() else "stopped"
-                web_state = "running" if lifecycle.web_healthy() else "stopped"
-                db_ok, db_msg = pg.check_health()
-                queue_depth = None
-                if worker_pool is not None and getattr(worker_pool, "queue", None) is not None:
-                    try:
-                        queue_depth = int(worker_pool.queue.qsize())
-                    except Exception:
-                        queue_depth = None
-                role = lifecycle.get_role() if hasattr(lifecycle, "get_role") else "unknown"
-                runtime_db_metrics = pg.get_runtime_metrics() if hasattr(pg, "get_runtime_metrics") else {}
-                overall_ok = db_ok and watcher_state == "running" and web_state == "running"
-                payload = {
-                    "status": "ok" if overall_ok else "degraded",
-                    "role": role,
-                    "watcher": watcher_state,
-                    "web": web_state,
-                    "db": "ok" if db_ok else "error",
-                    "db_error": db_msg,
-                    "queue_depth": queue_depth,
-                    "shutting_down": lifecycle.is_shutting_down(),
-                }
-                payload.update(runtime_db_metrics or {})
+            if parsed.path in ("/healthz", "/livez", "/readyz"):
+                payload, db_ok = self._health_snapshot()
+                role = payload.get("role")
+                watcher_ok = payload.get("watcher") == "running"
+                web_ok = payload.get("web") == "running"
+                is_shutting_down = bool(payload.get("shutting_down"))
+                if parsed.path == "/livez":
+                    live_ok = web_ok and (not is_shutting_down)
+                    payload["status"] = "ok" if live_ok else "degraded"
+                    self._send_json(
+                        payload,
+                        status=HTTPStatus.OK if live_ok else HTTPStatus.SERVICE_UNAVAILABLE,
+                    )
+                    return
+                if parsed.path == "/readyz":
+                    ready_ok = db_ok and web_ok and watcher_ok and role == "leader" and (not is_shutting_down)
+                    payload["status"] = "ok" if ready_ok else "degraded"
+                    payload["ready"] = bool(ready_ok)
+                    self._send_json(
+                        payload,
+                        status=HTTPStatus.OK if ready_ok else HTTPStatus.SERVICE_UNAVAILABLE,
+                    )
+                    return
+
+                overall_ok = db_ok and watcher_ok and web_ok
+                payload["status"] = "ok" if overall_ok else "degraded"
                 self._send_json(payload)
+                return
+
+            if parsed.path == "/api/task-queue/dead":
+                try:
+                    qs = parse_qs(parsed.query or "")
+                    limit = max(1, min(int((qs.get("limit") or ["100"])[0]), 500))
+                    items = pg.get_dead_tasks(limit=limit)
+                except Exception as ex:
+                    self._send_json(
+                        {"error": f"查询死信队列失败: {ex}"},
+                        status=HTTPStatus.SERVICE_UNAVAILABLE,
+                    )
+                    return
+                self._send_json({"items": items, "count": len(items)})
                 return
 
             if parsed.path == "/api/dashboard":
@@ -191,18 +259,11 @@ def create_dashboard_handler(
                                 runtime_data["queue_depth"] = None
                     data["runtime"] = runtime_data
 
-                    watcher_state = "running" if lifecycle.watcher_healthy() else "stopped"
-                    web_state = "running" if lifecycle.web_healthy() else "stopped"
-                    db_ok, db_msg = pg.check_health()
-                    overall_ok = db_ok and watcher_state == "running" and web_state == "running"
-                    data["health"] = {
-                        "status": "ok" if overall_ok else "degraded",
-                        "watcher": watcher_state,
-                        "web": web_state,
-                        "db": "ok" if db_ok else "error",
-                        "db_error": db_msg,
-                        "shutting_down": lifecycle.is_shutting_down(),
-                    }
+                    health_payload, db_ok = self._health_snapshot()
+                    watcher_ok = health_payload.get("watcher") == "running"
+                    web_ok = health_payload.get("web") == "running"
+                    health_payload["status"] = "ok" if (db_ok and watcher_ok and web_ok) else "degraded"
+                    data["health"] = health_payload
                 except Exception as ex:
                     logger.warning("查询看板数据失败：%s", ex)
                     with cache_lock:
@@ -321,6 +382,21 @@ def create_dashboard_handler(
                     )
                     return
                 self._send_json({"ok": True, "items": rows})
+                return
+
+            if parsed.path == "/api/task-queue/replay-dead":
+                payload = self._read_json_body() or {}
+                zip_path = payload.get("zip_path")
+                limit = payload.get("limit", 20)
+                try:
+                    paths = pg.replay_dead_tasks(zip_path=zip_path, limit=limit)
+                except Exception as ex:
+                    self._send_json(
+                        {"error": f"重放死信任务失败: {ex}"},
+                        status=HTTPStatus.SERVICE_UNAVAILABLE,
+                    )
+                    return
+                self._send_json({"ok": True, "replayed": len(paths), "zip_paths": paths})
                 return
 
             self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)

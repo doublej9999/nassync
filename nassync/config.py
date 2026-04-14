@@ -36,6 +36,7 @@ class Config:
     TASK_QUEUE_MAX_SIZE: int = 2000
     EVENT_DEDUP_WINDOW_SEC: float = 1.0
     DASHBOARD_CACHE_TTL_SEC: float = 2.0
+    DASHBOARD_AUTO_REFRESH_SEC: float = 5.0
 
     CHECK_ZIP_MAP_SAME_PREFIX: bool = True
     CHECK_MAP_FILENAME_FORMAT: bool = True
@@ -50,6 +51,8 @@ class Config:
     USE_PERSISTENT_QUEUE: bool = True
     TASK_FETCH_BATCH_SIZE: int = 20
     TASK_LOCK_SEC: int = 120
+    TASK_LOCK_RENEW_INTERVAL_SEC: int = 30
+    TASK_MAX_ATTEMPTS: int = 20
 
     SERVICE_NAME: str = "nassync-watcher"
     INSTANCE_ID: str = ""
@@ -206,6 +209,7 @@ def load_config() -> Config:
     merged["TASK_QUEUE_MAX_SIZE"] = int(merged["TASK_QUEUE_MAX_SIZE"])
     merged["EVENT_DEDUP_WINDOW_SEC"] = float(merged["EVENT_DEDUP_WINDOW_SEC"])
     merged["DASHBOARD_CACHE_TTL_SEC"] = float(merged["DASHBOARD_CACHE_TTL_SEC"])
+    merged["DASHBOARD_AUTO_REFRESH_SEC"] = float(merged["DASHBOARD_AUTO_REFRESH_SEC"])
     merged["CHECK_ZIP_MAP_SAME_PREFIX"] = _to_bool(merged["CHECK_ZIP_MAP_SAME_PREFIX"])
     merged["CHECK_MAP_FILENAME_FORMAT"] = _to_bool(merged["CHECK_MAP_FILENAME_FORMAT"])
     merged["INITIAL_SCAN"] = _to_bool(merged["INITIAL_SCAN"])
@@ -214,6 +218,8 @@ def load_config() -> Config:
     merged["SYNC_TYPES"] = _normalize_sync_types(sync_types_raw)
     merged["TASK_FETCH_BATCH_SIZE"] = int(merged["TASK_FETCH_BATCH_SIZE"])
     merged["TASK_LOCK_SEC"] = int(merged["TASK_LOCK_SEC"])
+    merged["TASK_LOCK_RENEW_INTERVAL_SEC"] = int(merged["TASK_LOCK_RENEW_INTERVAL_SEC"])
+    merged["TASK_MAX_ATTEMPTS"] = int(merged["TASK_MAX_ATTEMPTS"])
     merged["LEASE_DURATION_SEC"] = int(merged["LEASE_DURATION_SEC"])
     merged["LEASE_RENEW_INTERVAL_SEC"] = int(merged["LEASE_RENEW_INTERVAL_SEC"])
     merged["SERVICE_NAME"] = str(merged["SERVICE_NAME"]).strip()
@@ -279,12 +285,20 @@ def validate_config(cfg: Config, sync_types_raw=None):
 
     if cfg.DASHBOARD_CACHE_TTL_SEC < 0:
         report("DASHBOARD_CACHE_TTL_SEC 不能为负数")
+    if cfg.DASHBOARD_AUTO_REFRESH_SEC <= 0:
+        report("DASHBOARD_AUTO_REFRESH_SEC 必须大于 0")
 
     if cfg.TASK_FETCH_BATCH_SIZE < 1:
         report("TASK_FETCH_BATCH_SIZE 必须大于 0")
 
     if cfg.TASK_LOCK_SEC < 1:
         report("TASK_LOCK_SEC 必须大于 0")
+    if cfg.TASK_LOCK_RENEW_INTERVAL_SEC < 1:
+        report("TASK_LOCK_RENEW_INTERVAL_SEC 必须大于 0")
+    if cfg.TASK_LOCK_RENEW_INTERVAL_SEC >= cfg.TASK_LOCK_SEC:
+        report("TASK_LOCK_RENEW_INTERVAL_SEC 必须小于 TASK_LOCK_SEC")
+    if cfg.TASK_MAX_ATTEMPTS < 1:
+        report("TASK_MAX_ATTEMPTS 必须大于 0")
 
     if cfg.LEASE_DURATION_SEC < 5:
         report("LEASE_DURATION_SEC 必须大于等于 5")

@@ -11,3 +11,7 @@ def summarize_error_msg(error_msg, max_len=200):
 
 class RetryableProcessError(Exception):
     """表示短暂性错误，可重试。"""
+
+
+class FencingTokenLostError(Exception):
+    """租约令牌已失效，当前实例不再拥有写入权限。"""

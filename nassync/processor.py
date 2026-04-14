@@ -12,7 +12,7 @@ from pathlib import Path
 from psycopg2 import DatabaseError, InterfaceError, OperationalError
 
 from .config import Config
-from .errors import RetryableProcessError, summarize_error_msg
+from .errors import FencingTokenLostError, RetryableProcessError, summarize_error_msg
 
 logger = logging.getLogger("watcher")
 
@@ -115,6 +115,8 @@ class Processor:
         started_at = time.monotonic()
         if self.runtime_metrics is not None:
             self.runtime_metrics.on_task_started()
+        if self.pg is not None and hasattr(self.pg, "ensure_fencing_valid"):
+            self.pg.ensure_fencing_valid()
 
         route = self._resolve_route(path)
         if not route:
@@ -309,6 +311,7 @@ class Processor:
                 OperationalError,
                 InterfaceError,
                 DatabaseError,
+                FencingTokenLostError,
             ),
         ):
             return True
@@ -401,6 +404,8 @@ class Processor:
 
         if not self.wait_stable(path):
             raise RetryableProcessError("文件尚未稳定")
+        if self.pg is not None and hasattr(self.pg, "ensure_fencing_valid"):
+            self.pg.ensure_fencing_valid()
 
         source_zip_path = path
         target_dir.mkdir(parents=True, exist_ok=True)

@@ -4,6 +4,7 @@ import os
 import queue
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 logger = logging.getLogger("watcher")
@@ -21,15 +22,20 @@ class TaskWorkerPool:
         pg=None,
         persistent_queue=False,
         worker_id_prefix="worker",
+        can_process=None,
     ):
         self.processor = processor
         self.worker_count = worker_count
         self.pg = pg
         self.persistent_queue = bool(persistent_queue and pg is not None)
         self.worker_id_prefix = str(worker_id_prefix or "worker")
+        self._can_process = can_process if callable(can_process) else (lambda: True)
         claim_batch_size = getattr(processor.cfg, "TASK_FETCH_BATCH_SIZE", 20)
         self._claim_batch_size = max(1, int(claim_batch_size))
         self._memory_burst_before_claim = self._claim_batch_size
+        self._lock_renew_interval = max(
+            1, int(getattr(processor.cfg, "TASK_LOCK_RENEW_INTERVAL_SEC", 30))
+        )
         queue_size = max_queue_size or processor.cfg.TASK_QUEUE_MAX_SIZE
         self.queue = queue.Queue(maxsize=max(1, int(queue_size)))
         self.runtime_metrics = runtime_metrics or getattr(processor, "runtime_metrics", None)
@@ -98,16 +104,18 @@ class TaskWorkerPool:
 
     def _run_worker(self):
         worker_name = threading.current_thread().name
+        worker_id = f"{self.worker_id_prefix}:{worker_name}"
         memory_processed_since_claim = 0
         while True:
             if (
                 self.persistent_queue
                 and memory_processed_since_claim >= self._memory_burst_before_claim
+                and self._can_process()
             ):
-                claimed = self._claim_due_batch(worker_name)
+                claimed = self._claim_due_batch(worker_id)
                 if claimed:
                     for claimed_path in claimed:
-                        self._process_path(claimed_path, from_queue=False)
+                        self._process_path(claimed_path, from_queue=False, worker_id=worker_id)
                 memory_processed_since_claim = 0
 
             try:
@@ -115,11 +123,11 @@ class TaskWorkerPool:
             except queue.Empty:
                 if self._stop_event.is_set():
                     break
-                if self.persistent_queue:
-                    claimed = self._claim_due_batch(worker_name)
+                if self.persistent_queue and self._can_process():
+                    claimed = self._claim_due_batch(worker_id)
                     if claimed:
                         for claimed_path in claimed:
-                            self._process_path(claimed_path, from_queue=False)
+                            self._process_path(claimed_path, from_queue=False, worker_id=worker_id)
                         memory_processed_since_claim = 0
                 continue
 
@@ -127,16 +135,66 @@ class TaskWorkerPool:
                 self.queue.task_done()
                 break
 
-            self._process_path(path, from_queue=True)
+            if not self._can_process():
+                self._defer_when_not_owner(path)
+                with self._queue_lock:
+                    self._queued_paths.discard(str(path))
+                self.queue.task_done()
+                continue
+
+            self._process_path(path, from_queue=True, worker_id=worker_id)
             memory_processed_since_claim += 1
 
-    def _process_path(self, path: Path, from_queue: bool):
+    @contextmanager
+    def _lock_heartbeat(self, path: Path, worker_id: str):
+        if not self.persistent_queue or self.pg is None:
+            yield
+            return
+
+        stop_event = threading.Event()
+
+        def run():
+            while not stop_event.wait(timeout=self._lock_renew_interval):
+                try:
+                    ok = self.pg.renew_task_lock(
+                        path,
+                        worker_id=worker_id,
+                        lock_sec=self.processor.cfg.TASK_LOCK_SEC,
+                    )
+                    if not ok:
+                        logger.warning("任务锁续期失败（记录不存在或不再归属当前 worker）：%s", path)
+                        return
+                except Exception:
+                    logger.exception("任务锁续期异常：%s", path)
+                    return
+
+        thread = threading.Thread(
+            target=run,
+            name=f"task-lock-heartbeat-{threading.current_thread().name}",
+            daemon=True,
+        )
+        thread.start()
         try:
-            retry_delay = self.processor.process(path)
-            if retry_delay is not None and not self.persistent_queue:
-                self._schedule_retry(path, retry_delay)
-                if self.runtime_metrics is not None:
-                    self.runtime_metrics.on_task_retry_scheduled()
+            yield
+        finally:
+            stop_event.set()
+            thread.join(timeout=2)
+
+    def _process_path(self, path: Path, from_queue: bool, worker_id: str):
+        if not self._can_process():
+            if self.persistent_queue and self.pg is not None:
+                try:
+                    self.pg.release_task_claim(path, delay_sec=1.0, reason="当前实例非 leader，任务回退")
+                except Exception:
+                    logger.exception("回退任务失败：%s", path)
+            return
+        try:
+            with self._lock_heartbeat(path, worker_id):
+                retry_delay = self.processor.process(path)
+                if retry_delay is not None and not self.persistent_queue:
+                    self._schedule_retry(path, retry_delay)
+                    if self.runtime_metrics is not None:
+                        self.runtime_metrics.on_task_retry_scheduled()
         except Exception:
             logger.exception("Worker 处理时遇到未捕获异常：%s", path)
         finally:
@@ -145,12 +203,12 @@ class TaskWorkerPool:
                     self._queued_paths.discard(str(path))
                 self.queue.task_done()
 
-    def _claim_due_batch(self, worker_name: str):
+    def _claim_due_batch(self, worker_id: str):
         if not self.persistent_queue:
             return []
         try:
             items = self.pg.claim_due_tasks(
-                worker_id=f"{self.worker_id_prefix}:{worker_name}",
+                worker_id=worker_id,
                 batch_size=self._claim_batch_size,
                 lock_sec=self.processor.cfg.TASK_LOCK_SEC,
             )
@@ -160,6 +218,17 @@ class TaskWorkerPool:
         if not items:
             return []
         return items
+
+    def _defer_when_not_owner(self, path: Path):
+        if self.persistent_queue and self.pg is not None:
+            try:
+                self.pg.enqueue_task(path)
+                return
+            except Exception:
+                logger.exception("回退任务入库失败：%s", path)
+            logger.warning("持久化任务回退失败，当前任务将等待下次事件触发：%s", path)
+            return
+        self._schedule_retry(path, 1.0)
 
     def _schedule_retry(self, path: Path, delay_sec):
         try:
