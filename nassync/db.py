@@ -16,11 +16,11 @@ logger = logging.getLogger("watcher")
 
 
 class PgClient:
-    DB_TABLE = "zip_record"
-    DB_TASK_TABLE = "zip_task_status"
-    MAP_PATH_TABLE = "map_path_config"
-    SERVICE_LEASE_TABLE = "service_lease"
-    TASK_QUEUE_TABLE = "zip_task_queue"
+    DB_TABLE = "t_zip_record"
+    DB_TASK_TABLE = "t_zip_task_status"
+    MAP_PATH_TABLE = "t_map_path_config"
+    SERVICE_LEASE_TABLE = "t_service_lease"
+    TASK_QUEUE_TABLE = "t_zip_task_queue"
 
     def __init__(self, cfg: Config):
         self.cfg = cfg
@@ -325,7 +325,7 @@ class PgClient:
                             enabled BOOLEAN NOT NULL DEFAULT TRUE,
                             created_at TIMESTAMP NOT NULL DEFAULT NOW(),
                             updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-                            CONSTRAINT uq_map_path_config_watch UNIQUE (watch_dir)
+                            CONSTRAINT uq_t_map_path_config_watch UNIQUE (watch_dir)
                         )
                         """
                     )
@@ -349,7 +349,7 @@ class PgClient:
                     )
                     cur.execute(
                         f"""
-                        CREATE INDEX IF NOT EXISTS idx_map_path_config_enabled
+                        CREATE INDEX IF NOT EXISTS idx_t_map_path_config_enabled
                         ON {self.MAP_PATH_TABLE} (enabled, sync_types)
                         """
                     )
@@ -401,8 +401,8 @@ class PgClient:
                             last_error VARCHAR(1000),
                             created_at TIMESTAMP NOT NULL DEFAULT NOW(),
                             updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-                            CONSTRAINT uq_zip_task_queue_zip_path UNIQUE (zip_path),
-                            CONSTRAINT ck_zip_task_queue_status CHECK (
+                            CONSTRAINT uq_t_zip_task_queue_zip_path UNIQUE (zip_path),
+                            CONSTRAINT ck_t_zip_task_queue_status CHECK (
                                 status IN ('PENDING', 'RUNNING', 'RETRYING', 'SUCCESS', 'FAILED', 'SKIPPED', 'DEAD')
                             )
                         )
@@ -411,26 +411,26 @@ class PgClient:
                     cur.execute(
                         f"""
                         ALTER TABLE {self.TASK_QUEUE_TABLE}
-                        DROP CONSTRAINT IF EXISTS ck_zip_task_queue_status
+                        DROP CONSTRAINT IF EXISTS ck_t_zip_task_queue_status
                         """
                     )
                     cur.execute(
                         f"""
                         ALTER TABLE {self.TASK_QUEUE_TABLE}
-                        ADD CONSTRAINT ck_zip_task_queue_status CHECK (
+                        ADD CONSTRAINT ck_t_zip_task_queue_status CHECK (
                             status IN ('PENDING', 'RUNNING', 'RETRYING', 'SUCCESS', 'FAILED', 'SKIPPED', 'DEAD')
                         )
                         """
                     )
                     cur.execute(
                         f"""
-                        CREATE INDEX IF NOT EXISTS idx_zip_task_queue_pick
+                        CREATE INDEX IF NOT EXISTS idx_t_zip_task_queue_pick
                         ON {self.TASK_QUEUE_TABLE} (status, next_retry_at, updated_at)
                         """
                     )
                     cur.execute(
                         f"""
-                        CREATE INDEX IF NOT EXISTS idx_zip_task_queue_locked_until
+                        CREATE INDEX IF NOT EXISTS idx_t_zip_task_queue_locked_until
                         ON {self.TASK_QUEUE_TABLE} (locked_until)
                         """
                     )
