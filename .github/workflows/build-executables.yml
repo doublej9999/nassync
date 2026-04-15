@@ -1,0 +1,78 @@
+name: Build executable zips
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            exe_name: nassync
+            zip_name: nassync-linux.zip
+            folder: linux
+          - os: windows-latest
+            exe_name: nassync.exe
+            zip_name: nassync-windows.zip
+            folder: windows
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Build executable
+        run: pyinstaller --clean -y nassync.spec
+
+      - name: Assemble package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p release/${{ matrix.folder }}
+          cp dist/${{ matrix.exe_name }} release/${{ matrix.folder }}/
+          cp config.json README.md release/${{ matrix.folder }}/
+          python - <<'PY'
+          import zipfile
+          from pathlib import Path
+          root = Path('release')
+          folder = Path('${{ matrix.folder }}')
+          out = root / '${{ matrix.zip_name }}'
+          with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
+              for name in ['${{ matrix.exe_name }}', 'config.json', 'README.md']:
+                  p = root / folder / name
+                  z.write(p, arcname=f'{folder}/{name}')
+          print(out)
+          PY
+
+      - name: Assemble package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release\${{ matrix.folder }} | Out-Null
+          Copy-Item dist\${{ matrix.exe_name }} release\${{ matrix.folder }}\
+          Copy-Item config.json,README.md release\${{ matrix.folder }}\
+          Compress-Archive -Path release\${{ matrix.folder }}\* -DestinationPath release\${{ matrix.zip_name }} -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.zip_name }}
+          path: release/${{ matrix.zip_name }}
