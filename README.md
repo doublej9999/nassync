@@ -27,6 +27,146 @@ nassync/
 └─ tests/                 # pytest 用例
 ```
 
+### 1.1 组件架构图
+
+```mermaid
+flowchart LR
+    %% ========== Runtime ==========
+    subgraph Runtime["nassync Runtime (main.py / nassync.app.main)"]
+        CFG["config.py\nload_config / validate_config"]
+        APP["app.py\nServiceLifecycle + 主循环"]
+        OBS["observability.py\nRuntimeMetrics"]
+        LOG["logging_utils.py\nsetup_logging"]
+    end
+
+    %% ========== Ingestion ==========
+    subgraph Ingestion["文件监听与事件接入"]
+        WD["watchdog Observer / PollingObserver"]
+        H["watcher.py Handler\n事件去重(dedup)"]
+        SCAN["初始增量扫描\nrun_initial_scan_for_dir"]
+    end
+
+    %% ========== Processing ==========
+    subgraph Processing["任务调度与处理"]
+        POOL["workers.py TaskWorkerPool\n内存队列 + worker线程"]
+        CLAIM["持久化队列认领\nclaim_due_tasks / renew_task_lock"]
+        PROC["processor.py Processor\n校验/搬运/解压MAP/状态推进"]
+        RETRY["重试调度\nPENDING/RUNNING/RETRYING/..."]
+    end
+
+    %% ========== Web ==========
+    subgraph Web["监控与配置面板"]
+        HTTP["ThreadingHTTPServer"]
+        DASH["dashboard.py\n/dashboard + /api/dashboard"]
+        APICFG["/api/map-path-config\nGET/POST/Delete"]
+        HEALTH["/healthz"]
+        TPL["templates/dashboard.html"]
+    end
+
+    %% ========== DB ==========
+    subgraph PG["PostgreSQL (db.py PgClient)"]
+        LEASE["t_service_lease\nleader/standby 租约 + fencing token"]
+        Q["t_zip_task_queue\n持久化任务队列"]
+        STATUS["t_zip_task_status\n任务状态"]
+        RECORD["t_zip_record\nZIP解析入库"]
+        MAPCFG["t_map_path_config\n动态路径配置 + last_scan"]
+    end
+
+    %% ========== File System ==========
+    subgraph FS["NAS / 文件系统"]
+        WATCH["WATCH_DIR / 动态 watch dirs"]
+        TARGET["TARGET_DIR"]
+        BACKUP["BACKUP 目录"]
+        ZIP["ZIP / TAR 文件"]
+        MAP["ZIP内 .MAP"]
+    end
+
+    %% Wiring
+    CFG --> APP
+    LOG --> APP
+    OBS --> APP
+
+    WATCH --> WD --> H --> POOL
+    APP --> SCAN --> POOL
+
+    APP -->|leader选举/续租| LEASE
+    APP -->|仅leader启动监听| WD
+    APP --> HTTP --> DASH
+    DASH --> TPL
+    DASH --> APICFG --> MAPCFG
+    DASH --> HEALTH
+
+    POOL -->|持久化模式| CLAIM --> Q
+    POOL --> PROC --> RETRY
+    PROC --> STATUS
+    PROC --> RECORD
+    PROC --> MAPCFG
+    PROC --> LEASE
+
+    ZIP --> PROC
+    PROC --> MAP
+    PROC --> TARGET
+    PROC --> BACKUP
+```
+
+### 1.2 关键流程时序图
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant FS as NAS/WATCH_DIR
+    participant APP as app.py(ServiceLifecycle)
+    participant WD as Watchdog Handler
+    participant WP as TaskWorkerPool
+    participant PG as PostgreSQL
+    participant PR as Processor
+    participant WEB as Dashboard/API
+
+    Note over APP,PG: 启动阶段
+    APP->>PG: try_acquire_or_renew_lease(service_name, instance_id)
+    PG-->>APP: role=leader|standby + lease_token
+    alt leader
+        APP->>WD: start observer (watch dirs)
+        APP->>PG: get_active_watch_dirs + get_map_path_last_scan
+        APP->>WP: 初始扫描命中文件 enqueue
+    else standby
+        APP->>WD: stop observer / 不处理任务
+    end
+
+    Note over FS,WP: 文件事件进入队列
+    FS-->>WD: create/modify file
+    WD->>WP: enqueue(path) + dedup
+
+    alt USE_PERSISTENT_QUEUE=true
+        WP->>PG: enqueue_task(path) (先落库)
+        WP->>PG: claim_due_tasks(worker_id, batch, lock_sec)
+        PG-->>WP: 待执行 path 列表
+        loop 处理中
+            WP->>PG: renew_task_lock(path, worker_id)
+        end
+    end
+
+    WP->>PR: process(path)
+    PR->>PR: 校验路径/后缀/稳定性
+    alt ZIP
+        PR->>PR: 解析 ZIP 内 .MAP -> LOT/WAFER
+        PR->>PG: upsert t_zip_record
+    else 非ZIP(如.tar)
+        PR->>PR: 仅搬运+备份
+    end
+    PR->>PG: 更新 t_zip_task_status
+    PR->>PG: 推进 t_map_path_config.last_scan (GREATEST)
+    PR-->>WP: success / retry_delay / failed
+
+    opt 失败可重试
+        WP->>PG: 标记 RETRYING + next_retry_at
+    end
+
+    WEB->>PG: 读取 dashboard 统计 + health 数据
+    WEB-->>User: /dashboard, /api/dashboard, /healthz
+```
+
+
 ## 2. 处理规则
 
 ### 2.1 目录规则
